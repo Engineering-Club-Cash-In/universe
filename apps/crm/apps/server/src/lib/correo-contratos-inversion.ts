@@ -1,4 +1,5 @@
 import {
+	asuntoCompraCarteraAceptada,
 	COMPRA_CARTERA_RECIPIENTS,
 	enviarCorreoEnHilo,
 	obtenerHiloDeCorreo,
@@ -200,9 +201,9 @@ function armarHtml(params: {
  *
  * Con el hilo guardado (`emailThreadId`) cae dentro de él y le llega a los
  * mismos destinatarios que el original. Sin él —baterías de antes, o un
- * correo de aceptación que no salió— sale igual, con el mismo asunto y a la
- * lista de siempre, pero como correo aparte: sin el Message-ID real no hay
- * forma de colgarlo del hilo.
+ * correo de aceptación que no salió— sale igual, con el asunto de la compra
+ * (monto y hora) y a la lista de siempre, pero como correo aparte: sin el
+ * Message-ID real no hay forma de colgarlo del hilo.
  */
 export async function mandarContratosAlHilo(params: {
 	batchId: string;
@@ -213,6 +214,7 @@ export async function mandarContratosAlHilo(params: {
 		.select({
 			investorName: investorContractBatches.investorName,
 			montoTotal: investorContractBatches.montoTotal,
+			acceptedAt: investorContractBatches.acceptedAt,
 			emailThreadId: investorContractBatches.emailThreadId,
 		})
 		.from(investorContractBatches)
@@ -293,8 +295,18 @@ export async function mandarContratosAlHilo(params: {
 		? await obtenerHiloDeCorreo(bateria.emailThreadId)
 		: null;
 
+	// Sin hilo, el asunto de esta compra con su monto y su hora de aceptación:
+	// con el genérico, Gmail lo metía en la conversación de otra compra del
+	// mismo inversionista. No siempre es idéntico al del correo original (si la
+	// compra fue de varios inversionistas, ese correo no lleva nombre ni monto),
+	// pero la hora alcanza para que no se mezcle con otra compra.
 	const asuntoOriginal =
-		hilo?.asunto ?? `Compra de Cartera aceptada - ${bateria.investorName}`;
+		hilo?.asunto ??
+		asuntoCompraCarteraAceptada({
+			etiqueta: bateria.investorName,
+			monto: bateria.montoTotal,
+			aceptadaEn: bateria.acceptedAt,
+		});
 	const asunto = /^re:/i.test(asuntoOriginal)
 		? asuntoOriginal
 		: `Re: ${asuntoOriginal}`;

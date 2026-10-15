@@ -8,6 +8,7 @@ import PortalCompanyAddedEmail from "./templates/PortalCompanyAddedTemplate";
 import * as React from "react";
 import { EMAIL_DELIVERY_MODE } from "./deliveryMode";
 import { asuntoDeLiquidacion } from "./asuntoLiquidacion";
+import { asuntoCompraCarteraAceptada } from "./asuntoCompraCartera";
 
 import { z } from "zod";
 
@@ -72,6 +73,7 @@ export {
   type EmailDeliveryMode,
 } from "./deliveryMode";
 export { COMPRA_CARTERA_RECIPIENTS } from "./destinatariosCompraCartera";
+export { asuntoCompraCarteraAceptada } from "./asuntoCompraCartera";
 
 // Schema para validación de correo
 const emailSchema = z.string().email({ message: "Formato de correo electrónico inválido" });
@@ -651,6 +653,9 @@ export interface SendCompraCarteraAcceptedNotificationParams {
     fechaExpiraLabel: string;
     fechaBajaLabel: string;
   };
+  // Momento de la aceptación, para el asunto. Default: ahora (el correo sale
+  // en el momento en que se acepta).
+  aceptadaEn?: Date;
 }
 
 export const sendCompraCarteraAcceptedNotification = async ({
@@ -664,6 +669,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
   usuarioEmail,
   notasAdicionales,
   expiracion,
+  aceptadaEn = new Date(),
 }: SendCompraCarteraAcceptedNotificationParams) => {
   try {
     const validEmails = to.filter((email) => {
@@ -861,7 +867,12 @@ export const sendCompraCarteraAcceptedNotification = async ({
       from: `Club Cash In <no-reply@${domain}>`,
       to: validEmails,
       cc: validCc.length > 0 ? validCc : undefined,
-      subject: `Compra de Cartera aceptada - ${subjectLabel}`,
+      subject: asuntoCompraCarteraAceptada({
+        etiqueta: subjectLabel,
+        monto: operacionInfo?.monto,
+        aceptadaEn,
+        currencySymbol,
+      }),
       html,
     });
 

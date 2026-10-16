@@ -57,7 +57,6 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
 import { StatusCredit } from "../database/db/schema";
 import { obtenerCreditosParaBuroInterno } from "../controllers/buroInternoCredits";
-import { ErrorEntradaBuroInterno } from "../controllers/buroInternoCursor";
 
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
@@ -121,20 +120,12 @@ const INSOLUTO_NO_AUTORIZADO = { error: "No autorizado (requiere ADMIN o CONTA).
 export const creditRouter = new Elysia()
  
 .use(authMiddleware)
-  .get("/internal/buro-interno/creditos", async ({ query, set, user }) => {
+  .get("/internal/buro-interno/creditos", async ({ set, user }) => {
     const rechazo = await rechazoSiNoEsAdminActivo(user, set);
     if (rechazo) return rechazo;
-    const { cursor, pageSize } = query as {
-      cursor?: string;
-      pageSize?: string;
-    };
     try {
-      return await obtenerCreditosParaBuroInterno({ cursor, pageSize });
+      return await obtenerCreditosParaBuroInterno();
     } catch (error) {
-      if (error instanceof ErrorEntradaBuroInterno) {
-        set.status = 400;
-        return { message: error.message };
-      }
       console.error("Error consultando créditos para buró interno:", error);
       set.status = 500;
       return {

@@ -13,7 +13,8 @@ export type StatusCreditEnum =
 	| "INCOBRABLE"
 	| "PENDIENTE_CANCELACION"
 	| "MOROSO"
-	| "EN_CONVENIO";
+	| "EN_CONVENIO"
+	| "CAIDO";
 
 export type EstadoLiquidacionEnum =
 	| "NO_LIQUIDADO"
@@ -735,6 +736,33 @@ export interface PaginatedResponse<T> {
 	perPage: number;
 	totalCount?: number;
 	totalPages: number;
+}
+
+/** Payload mínimo de Cartera para las coincidencias automáticas del buró. */
+export interface CreditoBuroInterno {
+	creditos: {
+		credito_id: number;
+		usuario_id: number;
+		numero_credito_sifco: string;
+		statusCredit: StatusCreditEnum;
+	};
+	usuarios: {
+		usuario_id: number;
+		nombre: string;
+		nit: string | null;
+		direccion: string | null;
+	};
+	cancelaciones: Array<{
+		motivo: string;
+		observaciones: string | null;
+		cuotas_atrasadas: number;
+	}>;
+	incobrables: Array<{ motivo: string; observaciones: string | null }>;
+	caidos: Array<{ motivo: string; observaciones: string | null }>;
+}
+
+export interface RespuestaCreditosBuroInterno {
+	data: CreditoBuroInterno[];
 }
 
 export interface GetAllCreditsParams {

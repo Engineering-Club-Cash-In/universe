@@ -337,6 +337,13 @@
 			"when": 1791561900000,
 			"tag": "0053_add_factura_vehiculo_document_type",
 			"breakpoints": true
+		},
+		{
+			"idx": 47,
+			"version": "7",
+			"when": 1791892800000,
+			"tag": "0054_buro_interno_cartera_automatico",
+			"breakpoints": true
 		}
 	]
 }

@@ -1,0 +1,460 @@
+import {
+	normalizarDpiMatch,
+	normalizarNitMatch,
+	normalizarTexto,
+} from "./buro-interno-match";
+
+/**
+ * Una ficha guardada sigue representando al cliente de Cartera si coincide
+ * con alguna de sus identidades actuales por lead, DPI, NIT o nombre completo.
+ * Si el cliente dejó de listarla (p. ej. "Juan / María" pasó a "Juan"), no
+ * debe seguir recibiendo sus fuentes de riesgo.
+ */
+export function personaGuardadaFiguraEnCliente(
+	persona: {
+		nombres: string;
+		apellidos: string;
+		leadId: string | null;
+		dpi: string | null;
+		nit: string | null;
+	},
+	cliente: {
+		nombresCompletos: string[];
+		leadIds: string[];
+		dpis: Array<string | null>;
+		nits: Array<string | null>;
+	},
+): boolean {
+	if (persona.leadId && cliente.leadIds.includes(persona.leadId)) return true;
+	const dpi = normalizarDpiMatch(persona.dpi);
+	if (dpi && cliente.dpis.some((valor) => normalizarDpiMatch(valor) === dpi)) {
+		return true;
+	}
+	const nit = normalizarNitMatch(persona.nit);
+	if (nit && cliente.nits.some((valor) => normalizarNitMatch(valor) === nit)) {
+		return true;
+	}
+	const compactar = (valor: string) =>
+		normalizarTexto(valor).replace(/\s+/g, "");
+	const nombre = compactar(`${persona.nombres} ${persona.apellidos}`);
+	return (
+		nombre.length > 0 &&
+		cliente.nombresCompletos.some((valor) => compactar(valor) === nombre)
+	);
+}
+
+export type DatosPersonaAutomaticaComparables = {
+	activo: boolean;
+	leadId: string | null;
+	numeroCreditoSifco: string | null;
+	nombres: string;
+	apellidos: string;
+	dpi: string | null;
+	nit: string | null;
+	telefono: string | null;
+	direccion: string | null;
+	categoria: string;
+	motivo: string;
+	desactivadoPor: string | null;
+	desactivadoAt: Date | null;
+	motivoDesactivacion: string | null;
+};
+
+const CAMPOS_PERSONA_AUTOMATICA = [
+	"activo",
+	"leadId",
+	"numeroCreditoSifco",
+	"nombres",
+	"apellidos",
+	"dpi",
+	"nit",
+	"telefono",
+	"direccion",
+	"categoria",
+	"motivo",
+	"desactivadoPor",
+	"desactivadoAt",
+	"motivoDesactivacion",
+] as const satisfies ReadonlyArray<keyof DatosPersonaAutomaticaComparables>;
+
+function mismoValor(a: unknown, b: unknown): boolean {
+	if (a instanceof Date || b instanceof Date) {
+		if (!(a instanceof Date) || !(b instanceof Date)) return false;
+		return a.getTime() === b.getTime();
+	}
+	return a === b;
+}
+
+/** Evita mover `updated_at` cuando una sincronización no cambió la ficha. */
+export function cambioPersonaAutomatica(
+	actual: DatosPersonaAutomaticaComparables,
+	deseada: DatosPersonaAutomaticaComparables,
+): boolean {
+	return CAMPOS_PERSONA_AUTOMATICA.some(
+		(campo) => !mismoValor(actual[campo], deseada[campo]),
+	);
+}
+
+export type DecisionPersistenciaAutomatica =
+	| "crear"
+	| "actualizar"
+	| "reactivar";
+
+/** Una ficha manual demuestra que Cobros ya gestionó a la persona. */
+export function esFichaManual(persona: { origen: string } | null): boolean {
+	return persona?.origen === "manual";
+}
+
+/** Una ficha manual activa siempre tiene precedencia sobre la automática activa. */
+export function esFichaManualActiva(
+	persona: { activo: boolean; origen: string } | null,
+): boolean {
+	return persona?.activo === true && esFichaManual(persona);
+}
+
+/** Una baja automática del sistema puede reconciliarse; un retiro humano no. */
+export function esFichaAutomaticaReconciliable(persona: {
+	origen: string;
+	desactivadoPor: string | null;
+}): boolean {
+	return persona.origen === "automatico_cartera" && !persona.desactivadoPor;
+}
+
+export function decidirPersistenciaAutomatica(input: {
+	automatica: { activo: boolean } | null;
+}): DecisionPersistenciaAutomatica {
+	if (!input.automatica) return "crear";
+	return input.automatica.activo ? "actualizar" : "reactivar";
+}
+
+export type DatosFuenteCarteraComparables = {
+	personaId: string;
+	numeroCreditoSifco: string;
+	estadoCredito: string;
+	categoria: string;
+	motivo: string;
+	evidencia: Record<string, unknown>;
+};
+
+function mismoJson(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (Array.isArray(a) || Array.isArray(b)) {
+		return (
+			Array.isArray(a) &&
+			Array.isArray(b) &&
+			a.length === b.length &&
+			a.every((valor, indice) => mismoJson(valor, b[indice]))
+		);
+	}
+	if (
+		typeof a !== "object" ||
+		a === null ||
+		typeof b !== "object" ||
+		b === null
+	) {
+		return false;
+	}
+	const clavesA = Object.keys(a).sort();
+	const clavesB = Object.keys(b).sort();
+	return (
+		clavesA.length === clavesB.length &&
+		clavesA.every(
+			(clave, indice) =>
+				clave === clavesB[indice] &&
+				mismoJson(
+					(a as Record<string, unknown>)[clave],
+					(b as Record<string, unknown>)[clave],
+				),
+		)
+	);
+}
+
+/** Evita actualizar observado_at/updated_at cuando la fuente no cambió. */
+export function cambioFuenteCartera(
+	actual: DatosFuenteCarteraComparables,
+	deseada: DatosFuenteCarteraComparables,
+): boolean {
+	return (
+		actual.personaId !== deseada.personaId ||
+		actual.numeroCreditoSifco !== deseada.numeroCreditoSifco ||
+		actual.estadoCredito !== deseada.estadoCredito ||
+		actual.categoria !== deseada.categoria ||
+		actual.motivo !== deseada.motivo ||
+		!mismoJson(actual.evidencia, deseada.evidencia)
+	);
+}
+
+/**
+ * Reconciliación perezosa: incluye las coincidencias actuales y, de las fichas
+ * automáticas que coinciden con el candidato, solo sus usuarios aún riesgosos.
+ */
+export function usuariosParaSincronizacionAutomatica(input: {
+	usuariosCoincidentes: Iterable<number>;
+	personasCoincidentes: Iterable<string>;
+	usuariosPorPersona: ReadonlyMap<string, Iterable<number>>;
+	usuariosConRiesgo: Iterable<number>;
+}): number[] {
+	const resultado = new Set(input.usuariosCoincidentes);
+	const usuariosConRiesgo = new Set(input.usuariosConRiesgo);
+	for (const personaId of input.personasCoincidentes) {
+		for (const usuarioId of input.usuariosPorPersona.get(personaId) ?? []) {
+			if (usuariosConRiesgo.has(usuarioId)) resultado.add(usuarioId);
+		}
+	}
+	return [...resultado].sort((a, b) => a - b);
+}
+
+/** Conserva todas las identidades de Cartera que produjeron una coincidencia. */
+export function fuentesCoincidentesPorUsuario(input: {
+	coincidencias: Iterable<{ registroId: string }>;
+	usuarioPorFuente: ReadonlyMap<string, number>;
+}): Map<number, string[]> {
+	const resultado = new Map<number, Set<string>>();
+	for (const coincidencia of input.coincidencias) {
+		const usuarioId = input.usuarioPorFuente.get(coincidencia.registroId);
+		if (usuarioId === undefined) continue;
+		const fuentes = resultado.get(usuarioId) ?? new Set<string>();
+		fuentes.add(coincidencia.registroId);
+		resultado.set(usuarioId, fuentes);
+	}
+	return new Map(
+		[...resultado].map(([usuarioId, fuentes]) => [usuarioId, [...fuentes]]),
+	);
+}
+
+const CLAVES_REGLAS_IDENTIDAD = new Set([
+	"lead_igual",
+	"dpi_igual",
+	"nit_igual",
+	"nombre_completo_igual",
+]);
+
+/**
+ * Recupera candidatos que son la misma identidad que la fuente. Las reglas de
+ * familia, contacto o parecido no conceden precedencia a una ficha manual del
+ * candidato sobre la persona riesgosa de Cartera.
+ */
+export function candidatosIdentidadCoincidentesConFuente<
+	T extends { origen: string; etiqueta: string },
+>(input: {
+	candidatos: Iterable<T>;
+	coincidencias: Iterable<{
+		registroId: string;
+		origen: string;
+		etiqueta: string;
+		reglas: Iterable<{ clave: string }>;
+	}>;
+	fuenteId: string;
+}): T[] {
+	const coincidencias = [...input.coincidencias].filter(
+		(coincidencia) =>
+			coincidencia.registroId === input.fuenteId &&
+			[...coincidencia.reglas].some((regla) =>
+				CLAVES_REGLAS_IDENTIDAD.has(regla.clave),
+			),
+	);
+	return [...input.candidatos].filter((candidato) =>
+		coincidencias.some(
+			(coincidencia) =>
+				coincidencia.origen === candidato.origen &&
+				coincidencia.etiqueta === candidato.etiqueta,
+		),
+	);
+}
+
+/** Añade una ficha guardada sin omitirla por otros objetivos del mismo usuario. */
+export function agregarObjetivoPersonaGuardada<
+	T extends { personaAutomatica: { id: string } | null },
+>(objetivos: T[], objetivo: T): T[] {
+	if (
+		objetivo.personaAutomatica &&
+		objetivos.some(
+			(actual) =>
+				actual.personaAutomatica?.id === objetivo.personaAutomatica?.id,
+		)
+	) {
+		return objetivos;
+	}
+	return [...objetivos, objetivo];
+}
+
+/**
+ * Un crédito puede enlazarse al CRM por `opportunities.numero_sifco` o por la
+ * tabla de referencias. Ambos caminos enriquecen la misma fuente automática.
+ */
+export function indexarRelacionesLeadPorSifco<
+	T extends {
+		sifcoDirecto: string | null;
+		sifcoReferencia: string | null;
+	},
+>(filas: Iterable<T>, sifcosSolicitados: Iterable<string>): Map<string, T[]> {
+	const solicitados = new Set(sifcosSolicitados);
+	const porSifco = new Map<string, T[]>();
+	for (const fila of filas) {
+		for (const sifco of [fila.sifcoDirecto, fila.sifcoReferencia]) {
+			if (!sifco || !solicitados.has(sifco)) continue;
+			const relaciones = porSifco.get(sifco) ?? [];
+			if (!relaciones.includes(fila)) relaciones.push(fila);
+			porSifco.set(sifco, relaciones);
+		}
+	}
+	return porSifco;
+}
+
+export class EvaluacionBuroInternoInestableError extends Error {
+	constructor() {
+		super(
+			"El buró interno cambió repetidamente durante la evaluación. Recarga la oportunidad e intenta de nuevo.",
+		);
+		this.name = "EvaluacionBuroInternoInestableError";
+	}
+}
+
+/**
+ * Obtiene una evaluación asociada a una huella estable. La primera pasada puede
+ * crear o reactivar fichas automáticas; en ese caso se repite sobre la foto ya
+ * sincronizada. Un cambio externo concurrente también obliga a reevaluar.
+ */
+export async function evaluarConHuellaEstable<T>(parametros: {
+	huellaInicial: string;
+	obtenerHuella: () => Promise<string>;
+	evaluar: () => Promise<T>;
+	maxIntentos?: number;
+}): Promise<{ evaluacion: T; huella: string; intentos: number }> {
+	let huellaAntes = parametros.huellaInicial;
+	const maxIntentos = parametros.maxIntentos ?? 3;
+
+	for (let intento = 1; intento <= maxIntentos; intento += 1) {
+		const evaluacion = await parametros.evaluar();
+		const huellaDespues = await parametros.obtenerHuella();
+		if (huellaAntes === huellaDespues) {
+			return { evaluacion, huella: huellaDespues, intentos: intento };
+		}
+		huellaAntes = huellaDespues;
+	}
+
+	throw new EvaluacionBuroInternoInestableError();
+}
+
+/**
+ * Serializa en memoria las tareas de este proceso. Quien espera turno no abre
+ * transacción ni retiene una conexión de la base; el candado de Postgres sigue
+ * coordinando entre instancias. Un fallo no bloquea a las tareas siguientes.
+ */
+export function crearColaSerial(): <T>(tarea: () => Promise<T>) => Promise<T> {
+	let cola: Promise<unknown> = Promise.resolve();
+	return <T>(tarea: () => Promise<T>): Promise<T> => {
+		const resultado = cola.then(tarea, tarea);
+		cola = resultado.then(
+			() => undefined,
+			() => undefined,
+		);
+		return resultado;
+	};
+}
+
+/** La sincronización no obtuvo el candado del buró: otra instancia lo tiene. */
+export class SinTurnoBuroInternoError extends Error {
+	constructor() {
+		super("El candado del buró interno está ocupado.");
+		this.name = "SinTurnoBuroInternoError";
+	}
+}
+
+/**
+ * Reintenta una tarea mientras falle por falta de turno, esperando en memoria
+ * (sin retener conexiones de la base) con espera creciente hasta `maxMs`.
+ * Cualquier otro error se propaga de inmediato.
+ */
+export async function reintentarSinTurno<T>(
+	tarea: () => Promise<T>,
+	opciones: {
+		maxMs?: number;
+		esperar?: (ms: number) => Promise<void>;
+		ahora?: () => number;
+	} = {},
+): Promise<T> {
+	const maxMs = opciones.maxMs ?? 60_000;
+	const esperar =
+		opciones.esperar ??
+		((ms: number) => new Promise<void>((resolver) => setTimeout(resolver, ms)));
+	const ahora = opciones.ahora ?? Date.now;
+	const inicio = ahora();
+	let espera = 100;
+	for (;;) {
+		try {
+			return await tarea();
+		} catch (error) {
+			if (!(error instanceof SinTurnoBuroInternoError)) throw error;
+			if (ahora() - inicio + espera > maxMs) {
+				throw new Error(
+					"El buró interno está ocupado sincronizando con Cartera. Intenta de nuevo en unos segundos.",
+				);
+			}
+			await esperar(espera);
+			espera = Math.min(espera * 2, 2_000);
+		}
+	}
+}
+
+/**
+ * Busca, entre las identidades actuales de un cliente de Cartera, la que
+ * corresponde a una ficha guardada, para refrescar sus datos desde la fuente
+ * vigente. Prioriza el lead (por id, DPI, NIT o nombre) y luego la identidad
+ * base (por NIT o nombre). Un cliente con una sola identidad y sin leads
+ * corresponde a esa identidad.
+ */
+export function identidadActualDePersonaGuardada<
+	L extends {
+		id: string;
+		dpi: string | null;
+		nit: string | null;
+		nombres: string;
+		apellidos: string;
+	},
+	I extends { nombreCompleto: string; nit: string | null },
+>(
+	persona: {
+		leadId: string | null;
+		dpi: string | null;
+		nit: string | null;
+		nombres: string;
+		apellidos: string;
+	},
+	cliente: { identidades: I[]; leads: L[] },
+): { lead: L | null; identidad: I | null } {
+	const compactar = (valor: string) =>
+		normalizarTexto(valor).replace(/\s+/g, "");
+	const nombre = compactar(`${persona.nombres} ${persona.apellidos}`);
+	const dpi = normalizarDpiMatch(persona.dpi);
+	const nit = normalizarNitMatch(persona.nit);
+	const lead =
+		cliente.leads.find(
+			(l) => persona.leadId !== null && l.id === persona.leadId,
+		) ??
+		cliente.leads.find(
+			(l) => dpi !== null && normalizarDpiMatch(l.dpi) === dpi,
+		) ??
+		cliente.leads.find(
+			(l) => nit !== null && normalizarNitMatch(l.nit) === nit,
+		) ??
+		cliente.leads.find(
+			(l) =>
+				nombre.length > 0 &&
+				compactar(`${l.nombres} ${l.apellidos}`) === nombre,
+		) ??
+		null;
+	if (lead) return { lead, identidad: null };
+	const identidad =
+		cliente.identidades.find(
+			(i) => nit !== null && normalizarNitMatch(i.nit) === nit,
+		) ??
+		cliente.identidades.find(
+			(i) => nombre.length > 0 && compactar(i.nombreCompleto) === nombre,
+		) ??
+		(cliente.identidades.length === 1 && cliente.leads.length === 0
+			? cliente.identidades[0]
+			: null) ??
+		null;
+	return { lead: null, identidad };
+}

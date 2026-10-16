@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { validarRespuestaCreditosBuroInterno } from "../lib/buro-interno-cartera";
 import type {
 	BoletaPagoInversionista,
 	CarteraAsesor,
@@ -37,6 +38,7 @@ import type {
 	GetPaymentsParams,
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
+	RespuestaCreditosBuroInterno,
 	PaginatedResponse,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
@@ -1815,6 +1817,18 @@ export class CarteraBackClient {
 			`[CarteraBackClient] getAllCreditos: ${response.data.length} créditos obtenidos (página ${response.page}/${response.totalPages})`,
 		);
 
+		return response;
+	}
+
+	async obtenerCreditosBuroInterno(): Promise<RespuestaCreditosBuroInterno> {
+		const response = await this.request<RespuestaCreditosBuroInterno>(
+			"/internal/buro-interno/creditos",
+			{ method: "GET" },
+			false,
+			undefined,
+			undefined,
+			validarRespuestaCreditosBuroInterno,
+		);
 		return response;
 	}
 

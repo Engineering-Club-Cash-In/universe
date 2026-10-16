@@ -562,7 +562,7 @@ export const DEFINICIONES_REGLAS: DefinicionRegla[] = [
 			"Primer y segundo apellido iguales y en el mismo orden: posible hermano o hermana.",
 		tipo: "familia",
 		activaPorDefecto: true,
-		severidadPorDefecto: "media",
+		severidadPorDefecto: "alta",
 		parametrosPorDefecto: { aplica_a: ["titular", "codeudor"] },
 		parametros: [PARAM_APLICA_A],
 		evaluar: (c, r) =>
@@ -817,8 +817,8 @@ export function severidadMaxima(
 
 /**
  * Solo la severidad alta frena la aprobación del análisis: es cuando el motor
- * dice que es la misma persona (mismo lead, DPI, NIT, nombre completo o
- * teléfono). Las de familia y parecido avisan, pero no frenan.
+ * dice que la coincidencia requiere revisión obligatoria. Incluye identidad
+ * directa y la regla de los mismos dos apellidos en el mismo orden.
  */
 export const SEVERIDAD_QUE_BLOQUEA: BuroInternoSeveridad = "alta";
 

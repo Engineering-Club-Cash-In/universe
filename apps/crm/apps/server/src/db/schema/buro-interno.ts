@@ -35,6 +35,9 @@ export type BuroInternoCategoria = (typeof BURO_INTERNO_CATEGORIAS)[number];
 export const BURO_INTERNO_SEVERIDADES = ["alta", "media", "baja"] as const;
 export type BuroInternoSeveridad = (typeof BURO_INTERNO_SEVERIDADES)[number];
 
+export const BURO_INTERNO_ORIGENES = ["manual", "automatico_cartera"] as const;
+export type BuroInternoOrigen = (typeof BURO_INTERNO_ORIGENES)[number];
+
 export const buroInternoPersonas = pgTable(
 	"buro_interno_personas",
 	{
@@ -44,6 +47,10 @@ export const buroInternoPersonas = pgTable(
 		leadId: uuid("lead_id").references(() => leads.id, {
 			onDelete: "set null",
 		}),
+		origen: text("origen")
+			.$type<BuroInternoOrigen>()
+			.notNull()
+			.default("manual"),
 		numeroCreditoSifco: text("numero_credito_sifco"),
 
 		// Datos de la persona (copia al momento del registro)
@@ -59,9 +66,7 @@ export const buroInternoPersonas = pgTable(
 		motivo: text("motivo").notNull(),
 
 		activo: boolean("activo").notNull().default(true),
-		creadoPor: text("creado_por")
-			.notNull()
-			.references(() => user.id),
+		creadoPor: text("creado_por").references(() => user.id),
 		desactivadoPor: text("desactivado_por").references(() => user.id),
 		desactivadoAt: timestamp("desactivado_at", { withTimezone: true }),
 		motivoDesactivacion: text("motivo_desactivacion"),
@@ -96,6 +101,54 @@ export const buroInternoPersonas = pgTable(
 				sql`${table.activo} AND ${table.nit} IS NOT NULL AND upper(regexp_replace(${table.nit}, '[^0-9A-Za-z]', '', 'g')) <> 'CF' AND length(regexp_replace(${table.nit}, '[^0-9A-Za-z]', '', 'g')) >= 3`,
 			),
 		index("buro_interno_personas_activo_idx").on(table.activo, table.createdAt),
+		check(
+			"buro_interno_personas_origen_chk",
+			sql`${table.origen} IN ('manual', 'automatico_cartera')`,
+		),
+	],
+);
+
+/**
+ * Evidencias de Cartera que originaron una ficha automática del buró.
+ * Una persona puede conservar aquí varios créditos; Cobros no usa esta tabla.
+ */
+export const buroInternoFuentesCartera = pgTable(
+	"buro_interno_fuentes_cartera",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		personaId: uuid("persona_id")
+			.notNull()
+			.references(() => buroInternoPersonas.id, { onDelete: "cascade" }),
+		carteraUsuarioId: integer("cartera_usuario_id").notNull(),
+		carteraCreditoId: integer("cartera_credito_id").notNull(),
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
+		estadoCredito: text("estado_credito").notNull(),
+		categoria: text("categoria").$type<BuroInternoCategoria>().notNull(),
+		motivo: text("motivo").notNull(),
+		evidencia: jsonb("evidencia")
+			.$type<Record<string, unknown>>()
+			.notNull()
+			.default({}),
+		observadoAt: timestamp("observado_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("buro_interno_fuentes_cartera_persona_usuario_credito_uq").on(
+			table.personaId,
+			table.carteraUsuarioId,
+			table.carteraCreditoId,
+		),
+		index("buro_interno_fuentes_cartera_persona_idx").on(table.personaId),
+		index("buro_interno_fuentes_cartera_usuario_idx").on(
+			table.carteraUsuarioId,
+		),
 	],
 );
 
@@ -132,8 +185,8 @@ export const buroInternoReglas = pgTable(
  * Autorizaciones para aprobar un análisis pese al buró interno. Una coincidencia
  * de severidad alta frena la aprobación; el analista la levanta con un motivo,
  * y la autorización vale solo para esa oportunidad, esa persona y la identidad
- * que se evaluó: si después aparece otra coincidencia alta, o la oportunidad
- * cambia de lead o de DPI, vuelve a frenar.
+ * que se evaluó: si después aparece otra coincidencia alta, cambia la evidencia
+ * automática, o la oportunidad cambia de lead o de DPI, vuelve a frenar.
  */
 export const buroInternoAutorizaciones = pgTable(
 	"buro_interno_autorizaciones",
@@ -176,7 +229,12 @@ export const buroInternoEventos = pgTable(
 			onDelete: "set null",
 		}),
 		reglaClave: text("regla_clave"),
-		/** alta | edicion | baja | reactivacion | regla_actualizada | consulta */
+		/**
+		 * Manuales: alta, edicion, baja, regla_actualizada, consulta,
+		 * autorizacion_analisis. Automáticas de Cartera: alta, retiro,
+		 * reactivacion, actualizacion, vinculo, retiro de fuentes e invalidacion
+		 * de autorizaciones por cambios de evidencia.
+		 */
 		accion: text("accion").notNull(),
 		detalle: jsonb("detalle").$type<Record<string, unknown>>(),
 		realizadoPor: text("realizado_por").references(() => user.id),

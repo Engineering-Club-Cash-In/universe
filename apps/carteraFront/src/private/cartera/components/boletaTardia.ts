@@ -21,6 +21,7 @@ const q = (monto: string | number) => `Q${Number(monto).toFixed(2)}`;
 const RAZONES_GRISES: Partial<Record<RazonBoletaTardia, string>> = {
   no_queda_al_dia: "Pagó a tiempo, pero este pago no deja el crédito al día: no se puede condonar.",
   no_alcanza_mora: "El pago no alcanza ni para la mora de cuotas anteriores: no se puede condonar.",
+  fuera_de_tope: "Pagó a tiempo, pero pasaron más de 5 días desde el vencimiento: no se puede condonar.",
 };
 const MOTIVO_FALTAN_DATOS = "Para condonar hace falta el banco, el número de autorización y la imagen de la boleta.";
 
@@ -97,7 +98,7 @@ export function textoFechasBoletaTardia(v: VistaPreviaBoletaTardia): string {
   const dias = v.diasRetraso ?? 0;
   // Si califica por fecha (aplica, o gris que el back devuelve con el vencimiento que califica) y la boleta es
   // posterior al vencimiento, es porque venció en día inhábil. Por razón, no solo por fechas: otra razón gris no califica.
-  const califica = v.aplica || v.razon === "no_queda_al_dia" || v.razon === "no_alcanza_mora";
+  const califica = v.aplica || v.razon === "no_queda_al_dia" || v.razon === "no_alcanza_mora" || v.razon === "fuera_de_tope";
   const inhabil = califica && v.fechaBoleta > v.fechaVencimiento ? " (vence en día inhábil: cuenta el siguiente día hábil)" : "";
   return `Vence ${fechaCortaBoletaTardia(v.fechaVencimiento)}${inhabil} · Boleta ${fechaCortaBoletaTardia(v.fechaBoleta)} · Hoy ${fechaCortaBoletaTardia(v.fechaRegistro)} (${dias} ${dias === 1 ? "día" : "días"} de retraso)`;
 }

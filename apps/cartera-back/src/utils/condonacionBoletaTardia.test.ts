@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import Big from "big.js";
 import {
   TOPE_DIAS_BOLETA_TARDIA,
+  cuotasATiempoBoletaTardia,
   cuotasQueCalificanBoletaTardia,
   decidirCondonacionBoletaTardia,
   decidirCondonacionNexaATiempo,
@@ -27,6 +28,18 @@ const aTiempo = {
   vencimientoCuotaAnterior: anterior([12, "2026-08-30"]),
   monto: "1000.00",
 };
+
+describe("cuotasATiempoBoletaTardia", () => {
+  test("boleta ≤ vencimiento (o el siguiente hábil si vence inhábil) es a tiempo; no mira el tope", () => {
+    const cs = [
+      { cuota_id: 1, fecha_vencimiento: "2026-08-31" }, // lunes: boleta 01-sep es tarde
+      { cuota_id: 2, fecha_vencimiento: "2026-09-26" }, // sábado: cuenta hasta el lunes 28-sep
+      { cuota_id: 3, fecha_vencimiento: "2026-09-30" },
+    ];
+    expect(cuotasATiempoBoletaTardia(cs, "2026-09-28").map((c) => c.cuota_id)).toEqual([2, 3]);
+    expect(cuotasATiempoBoletaTardia(cs, "2026-10-01")).toEqual([]);
+  });
+});
 
 describe("decidirCondonacionBoletaTardia", () => {
   test("TOPE_DIAS_BOLETA_TARDIA es 5", () => {

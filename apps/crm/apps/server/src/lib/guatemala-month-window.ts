@@ -20,3 +20,13 @@ export function getGuatemalaMonthWindow(year: number, month: number) {
 		),
 	};
 }
+
+/** Los 3 meses que terminan en (year, month), del más viejo al elegido, cada uno con su ventana en hora de Guatemala. */
+export function getUltimosTresMesesGT(year: number, month: number) {
+	return [2, 1, 0].map((mesesAtras) => {
+		const fecha = new Date(Date.UTC(year, month - 1 - mesesAtras, 1));
+		const y = fecha.getUTCFullYear();
+		const m = fecha.getUTCMonth() + 1;
+		return { year: y, month: m, ...getGuatemalaMonthWindow(y, m) };
+	});
+}

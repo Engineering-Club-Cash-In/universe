@@ -143,6 +143,12 @@ export const PERMISSIONS = {
 	canManageAllCompanies: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 
+	// Alta/edición de agencias y sus gerentes (módulo de agencias). Hoy
+	// coincide con canManageAllCompanies, pero es un permiso aparte: es el que
+	// debe cambiar si el módulo se abre a otro rol.
+	canManageAgencies: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
+
 	canCreateLeads: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||

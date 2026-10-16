@@ -22,6 +22,12 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import {
+	actualizarEmpresa,
+	actualizarEmpresaInput,
+	crearEmpresa,
+	crearEmpresaInput,
+} from "../lib/companies";
+import {
 	insuranceInvoiceSubmissions,
 	opportunityAgencySellers,
 	vehicleDocumentRequirements,
@@ -1156,36 +1162,8 @@ export const crmRouter = {
 	}),
 
 	createCompany: crmProcedure
-		.input(
-			z.object({
-				name: z.string().min(1, "Company name is required"),
-				razonSocial: z.string().trim().optional(),
-				industry: z.string().optional(),
-				size: z.string().optional(),
-				website: z.string().optional(),
-				address: z.string().optional(),
-				phone: z.string().optional(),
-				email: z.string().email().optional(),
-				notes: z.string().optional(),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			// crmProcedure deja pasar a jurídico, que no da de alta empresas
-			if (!PERMISSIONS.canCreateCompanies(context.userRole)) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para crear empresas",
-				});
-			}
-			const newCompany = await db
-				.insert(companies)
-				.values({
-					...input,
-					createdBy: context.userId,
-					updatedAt: new Date(),
-				})
-				.returning();
-			return newCompany[0];
-		}),
+		.input(crearEmpresaInput)
+		.handler(({ input, context }) => crearEmpresa(db, input, context)),
 
 	/**
 	 * Completar el nombre legal de una agencia desde el detalle de la
@@ -1515,43 +1493,8 @@ export const crmRouter = {
 		}),
 
 	updateCompany: crmProcedure
-		.input(
-			z.object({
-				id: z.string().uuid(),
-				name: z.string().min(1, "Company name is required").optional(),
-				razonSocial: z.string().trim().optional(),
-				industry: z.string().optional(),
-				size: z.string().optional(),
-				website: z.string().optional(),
-				address: z.string().optional(),
-				phone: z.string().optional(),
-				email: z.string().email().optional(),
-				notes: z.string().optional(),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			const { id, ...updateData } = input;
-
-			// Supervisors can update the complete sales directory.
-			const whereClause = PERMISSIONS.canManageAllCompanies(context.userRole)
-				? eq(companies.id, id)
-				: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
-
-			const updatedCompany = await db
-				.update(companies)
-				.set({ ...updateData, updatedAt: new Date() })
-				.where(whereClause)
-				.returning();
-
-			if (updatedCompany.length === 0) {
-				throw new ORPCError("NOT_FOUND", {
-					message:
-						"Empresa no encontrada o no tienes permiso para actualizarla",
-				});
-			}
-
-			return updatedCompany[0];
-		}),
+		.input(actualizarEmpresaInput)
+		.handler(({ input, context }) => actualizarEmpresa(db, input, context)),
 
 	// Leads
 	getLeads: crmProcedure

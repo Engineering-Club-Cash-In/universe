@@ -327,12 +327,15 @@ integrationTest("tope por cuota: 5 días entra, 6 no (el tope acota también el 
   expect(r5.porCuota).toEqual([{ cuota_id: cuotaId(d5, 12), numero_cuota: 12, fecha_vencimiento: "2026-09-28", monto: devengado(5).toFixed(6) }]);
   const d6 = await con("2026-09-27", devengado(6).toFixed(2)); // 22.40
   const r6 = await calcular(ent(d6, { fecha_boleta: "2026-09-27" }), dd);
-  expect([r6.aplica, r6.razon, r6.montoCondonar, r6.porCuota]).toEqual([false, "fuera_de_tope", "0.00", []]);
+  expect([r6.aplica, r6.razon, r6.montoCondonar, r6.moraACobrar, r6.porCuota]).toEqual([false, "fuera_de_tope", "0.00", "0.00", []]);
+  // Solo para la vista: el recuadro gris trae la línea de tiempo de la cuota a tiempo.
+  expect([r6.fechaVencimiento, r6.diasRetraso]).toEqual(["2026-09-27", 6]);
   const d1 = await con("2026-10-02", devengado(1).round(2, Big.roundUp).toFixed(2)); // 1 día
   expect((await calcular(ent(d1, { fecha_boleta: "2026-10-02" }), dd))).toMatchObject({ aplica: true, diasRetraso: 1 });
   // Mismo vencimiento visto un día después (hoy = 04-oct): el que tenía 5 pasa a 6.
   const r5mañana = await calcular(ent(d5, { fecha_boleta: "2026-09-28" }), await deps({ hoy: new Date(2026, 9, 4) }));
   expect([r5mañana.aplica, r5mañana.razon, r5mañana.fechaRegistro]).toEqual([false, "fuera_de_tope", "2026-10-04"]);
+  expect([r5mañana.fechaVencimiento, r5mañana.diasRetraso, r5mañana.montoCondonar]).toEqual(["2026-09-28", 6, "0.00"]);
 });
 
 integrationTest("tope POR CUOTA: la cuota de 13 días es mora legítima (se cobra), la de 3 se condona", async () => {

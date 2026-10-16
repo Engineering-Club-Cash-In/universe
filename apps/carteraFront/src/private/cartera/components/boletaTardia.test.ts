@@ -29,6 +29,10 @@ describe("estadoRecuadroBoletaTardia", () => {
     expect(a).toMatchObject({ tipo: "gris", motivo: "Pagó a tiempo, pero este pago no deja el crédito al día: no se puede condonar." });
     const b = estadoRecuadroBoletaTardia(vista({ aplica: false, razon: "no_alcanza_mora", porCuota: [] }), completo);
     expect(b).toMatchObject({ tipo: "gris", motivo: "El pago no alcanza ni para la mora de cuotas anteriores: no se puede condonar." });
+    const c = estadoRecuadroBoletaTardia(vista({ aplica: false, razon: "fuera_de_tope", montoCondonar: "0.00", porCuota: [] }), completo);
+    expect(c).toMatchObject({ tipo: "gris", motivo: "Pagó a tiempo, pero pasaron más de 5 días desde el vencimiento: no se puede condonar." });
+    // Sin fecha de vencimiento (el back no la manda si no hay línea de tiempo coherente) sigue oculto.
+    expect(estadoRecuadroBoletaTardia(vista({ aplica: false, razon: "fuera_de_tope", fechaVencimiento: null }), completo)).toEqual({ tipo: "oculto" });
   });
   test("aplica pero falta banco, número de autorización o imagen → gris (no se puede marcar)", () => {
     for (const falta of [{ bancoId: 0 }, { numeroAutorizacion: "  " }, { hayBoleta: false }]) {
@@ -36,8 +40,8 @@ describe("estadoRecuadroBoletaTardia", () => {
       expect(e).toMatchObject({ tipo: "gris", motivo: "Para condonar hace falta el banco, el número de autorización y la imagen de la boleta." });
     }
   });
-  test("el resto de razones no muestran recuadro (boleta posterior, más de 5 días, estado excluido, sin mora…)", () => {
-    for (const razon of ["fuera_de_ventana", "fuera_de_tope", "estado_no_aplica", "sin_mora", "boleta_invalida", "boleta_de_otro_periodo", "credito_no_encontrado"] as const) {
+  test("el resto de razones no muestran recuadro (boleta posterior, estado excluido, sin mora…)", () => {
+    for (const razon of ["fuera_de_ventana", "estado_no_aplica", "sin_mora", "boleta_invalida", "boleta_de_otro_periodo", "credito_no_encontrado"] as const) {
       expect(estadoRecuadroBoletaTardia(vista({ aplica: false, razon, porCuota: [] }), completo)).toEqual({ tipo: "oculto" });
     }
   });
@@ -239,13 +243,18 @@ describe("Codex r2 #1990: cascadaSinCondonar (aviso de 'Abonar todo a Capital')"
 describe("Codex r2 #1994: la explicación del día inhábil también en los grises que califican por fecha", () => {
   // Vence sábado 03-oct, boleta del lunes 05-oct: califica por fecha solo por el día inhábil.
   const fechas = { fechaVencimiento: "2026-10-03", fechaBoleta: "2026-10-05", fechaRegistro: "2026-10-07", diasRetraso: 4 };
-  test("no_queda_al_dia y no_alcanza_mora con boleta posterior al vencimiento: lleva la anotación", () => {
-    for (const razon of ["no_queda_al_dia", "no_alcanza_mora"] as const) {
+  test("no_queda_al_dia, no_alcanza_mora y fuera_de_tope con boleta posterior al vencimiento: lleva la anotación", () => {
+    for (const razon of ["no_queda_al_dia", "no_alcanza_mora", "fuera_de_tope"] as const) {
       expect(textoFechasBoletaTardia(vista({ ...fechas, aplica: false, razon }))).toContain("(vence en día inhábil");
     }
   });
   test("el mismo gris con boleta = vencimiento: sin anotación", () => {
     expect(textoFechasBoletaTardia(vista({ ...fechas, fechaBoleta: "2026-10-03", aplica: false, razon: "no_queda_al_dia" }))).not.toContain("inhábil");
+  });
+  test("fuera_de_tope con boleta = vencimiento: sin anotación, con los días de retraso", () => {
+    const t = textoFechasBoletaTardia(vista({ ...fechas, fechaBoleta: "2026-10-03", fechaRegistro: "2026-10-12", diasRetraso: 9, aplica: false, razon: "fuera_de_tope" }));
+    expect(t).not.toContain("inhábil");
+    expect(t).toContain("(9 días de retraso)");
   });
   test("fuera_de_ventana con fechas: sin anotación (no califica)", () => {
     expect(textoFechasBoletaTardia(vista({ ...fechas, aplica: false, razon: "fuera_de_ventana" }))).not.toContain("inhábil");

@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { deflateRawSync } from "node:zlib";
 import { documentTypeEnum } from "../db/schema/documents";
 import {
-	CORREOS_POLIZAS_GYT,
 	CORREOS_POLIZAS_INTERNOS,
 	CORREOS_POLIZAS_UNIVERSALES,
+	correosPolizasGyt,
 	destinatariosDe,
 	envioSinConfirmar,
 	nombreDeFactura,
@@ -126,18 +126,44 @@ describe("destinatariosDe", () => {
 	test("las listas fijas de pólizas más el equipo interno", () => {
 		// Explícitas: si otro test mockea el módulo en el mismo proceso, las
 		// listas por defecto podrían no ser las reales.
+		const gyt = ["g1@ejemplo.com", "g2@ejemplo.com"];
 		const fijas = {
-			gyt: CORREOS_POLIZAS_GYT,
+			gyt,
 			universales: CORREOS_POLIZAS_UNIVERSALES,
 		};
 		expect(destinatariosDe("gyt", fijas, CORREOS_POLIZAS_INTERNOS)).toEqual([
-			...CORREOS_POLIZAS_GYT,
+			...gyt,
 			...CORREOS_POLIZAS_INTERNOS,
 		]);
 		expect(
 			destinatariosDe("universales", fijas, CORREOS_POLIZAS_INTERNOS),
 		).toEqual([...CORREOS_POLIZAS_UNIVERSALES, ...CORREOS_POLIZAS_INTERNOS]);
 		expect(CORREOS_POLIZAS_INTERNOS).toHaveLength(10);
+	});
+});
+
+describe("correosPolizasGyt", () => {
+	test("parte por coma, recorta espacios y descarta vacíos", () => {
+		expect(correosPolizasGyt(" a@x.com, b@x.com ,,")).toEqual([
+			"a@x.com",
+			"b@x.com",
+		]);
+	});
+
+	test("variable vacía o solo comas deja la lista vacía", () => {
+		expect(correosPolizasGyt("")).toEqual([]);
+		expect(correosPolizasGyt(" , ,")).toEqual([]);
+	});
+
+	test("sin la variable de entorno el envío a G&T queda sin destinatario", () => {
+		const previo = process.env.CORREOS_POLIZAS_GYT;
+		delete process.env.CORREOS_POLIZAS_GYT;
+		try {
+			expect(destinatariosDe("gyt")).toEqual([]);
+		} finally {
+			if (previo === undefined) delete process.env.CORREOS_POLIZAS_GYT;
+			else process.env.CORREOS_POLIZAS_GYT = previo;
+		}
 	});
 });
 

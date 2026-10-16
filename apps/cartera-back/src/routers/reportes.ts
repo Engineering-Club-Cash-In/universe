@@ -354,8 +354,17 @@ export const reportesRouter = new Elysia().use(authMiddleware)
         set.status = 400;
         return { error: "Parámetro 'asesores' inválido" };
       }
+      const cierre = await getOfficialClosure(client, periodo, asesoresIds);
+      // Elysia manda `null` como cuerpo vacío, y el CRM no lo puede leer como JSON:
+      // la pantalla lo tomaba como error. Sin cierre cargado se responde `null` explícito.
+      if (cierre === null) {
+        return new Response("null", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
       set.status = 200;
-      return getOfficialClosure(client, periodo, asesoresIds);
+      return cierre;
     } catch (error) {
       console.error("[/reportes/cierre-mora-oficial]", error);
       set.status = 500;

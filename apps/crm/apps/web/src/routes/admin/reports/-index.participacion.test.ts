@@ -147,15 +147,23 @@ test("integra la mora oficial en la tabla existente sin tarjeta adicional", asyn
 	expect(source).toContain("rows: montoCobrarRows");
 });
 
-test("bloquea la tabla sin mora oficial pero la exportación solo espera mientras carga", async () => {
+test("sin mora oficial muestra la tabla con la mora calculada y avisa; la exportación solo espera mientras carga", async () => {
 	const source = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
 	expect(source).toContain(
 		"enabled: canAccessCobranzaReport && officialMoraRequired",
 	);
 	expect(source).toContain(
-		"{officialMoraReady && !!montoCobrarData?.data.length && (",
+		"{!officialMoraPending && !!montoCobrarData?.data.length && (",
 	);
-	expect(source).toContain("{officialMoraFailed && (");
+	expect(source).toMatch(
+		/\{!!montoCobrarData\?\.data\.length && !officialMoraPending && officialMoraMissing && \(/,
+	);
+	expect(source).toMatch(
+		/officialMoraQuery\.isError\s*\?\s*"No se pudo cargar el cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera\."\s*:\s*"Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera\."/,
+	);
+	expect(source).not.toContain("officialMoraReady");
+	expect(source).not.toContain("officialMoraFailed");
+	expect(source).not.toContain("No fue posible cargar la mora oficial del mes");
 
 	expect(source).not.toContain("if (!officialMoraReady)");
 	expect(source).not.toContain("disabled={!officialMoraReady}");

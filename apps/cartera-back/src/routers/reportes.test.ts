@@ -9,6 +9,8 @@ import { lockPoolMock } from "../utils/testMocks";
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 const execute = mock(() => Promise.resolve({ rows: [] }));
+const query = mock(() => Promise.resolve({ rows: [] as unknown[] }));
+const connect = mock(() => Promise.resolve({ query, release: () => {} }));
 
 // `lockPool` va aunque este archivo no lo use: `mock.module` es GLOBAL en bun
 // test, así que este mock de "../database" es el que ven los demás archivos de
@@ -17,7 +19,7 @@ const execute = mock(() => Promise.resolve({ rows: [] }));
 // revienta entero al cargarse con "Export named 'lockPool' not found".
 mock.module("../database", () => ({
   db: { execute },
-  client: {},
+  client: { connect },
   lockPool: lockPoolMock,
 }));
 
@@ -62,5 +64,37 @@ describe("GET /reportes/mora-recuperacion-por-asesor", () => {
 			error = caughtError;
 		}
 		expect(error).toMatchObject({ name: "MoraRecoveryFuturePeriodError" });
+	});
+});
+
+describe("GET /reportes/cierre-mora-oficial", () => {
+	it("sin cierre cargado responde null como JSON válido", async () => {
+		query.mockClear();
+		query.mockResolvedValueOnce({ rows: [] });
+		const token = jwt.sign({ role: "ADMIN" }, JWT_SECRET);
+		const response = await reportesRouter.handle(
+			new Request(
+				"http://localhost/reportes/cierre-mora-oficial?periodo=2026-09-01",
+				{ headers: { authorization: `Bearer ${token}` } },
+			),
+		);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toContain("application/json");
+		expect(await response.json()).toBeNull();
+	});
+
+	it("un error de base cae en el catch de la ruta y responde 500 con el mensaje genérico", async () => {
+		connect.mockRejectedValueOnce(new Error("fallo de base de datos"));
+		const token = jwt.sign({ role: "ADMIN" }, JWT_SECRET);
+		const response = await reportesRouter.handle(
+			new Request(
+				"http://localhost/reportes/cierre-mora-oficial?periodo=2026-09-01",
+				{ headers: { authorization: `Bearer ${token}` } },
+			),
+		);
+
+		expect(response.status).toBe(500);
+		expect(await response.json()).toEqual({ error: "Error interno del servidor" });
 	});
 });

@@ -12,6 +12,9 @@ type Props = {
 	// Listado: logo, título, correo y agencias. Caso: solo "Volver".
 	variante: "listado" | "caso";
 	agencias?: string;
+	// Solo variante "caso": a dónde lleva "Volver" y qué tan ancho es el contenido.
+	volverA?: "/" | "/usuarios";
+	ancho?: "2xl" | "3xl";
 };
 
 function iniciales(texto: string | undefined) {
@@ -83,16 +86,15 @@ function MenuAvatar() {
 							{session?.user.email}
 						</p>
 					</div>
-					{/* <a> y no <Link>: /usuarios se registra en 6/7. */}
 					<Link role="menuitem" to="/perfil" className={itemClase}>
 						<User className="h-4 w-4" />
 						Mi perfil
 					</Link>
 					{verUsuarios && (
-						<a role="menuitem" href="/usuarios" className={itemClase}>
+						<Link role="menuitem" to="/usuarios" className={itemClase}>
 							<Users className="h-4 w-4" />
 							Usuarios de mi agencia
-						</a>
+						</Link>
 					)}
 					<button
 						type="button"
@@ -109,15 +111,22 @@ function MenuAvatar() {
 	);
 }
 
-export function Encabezado({ variante, agencias }: Props) {
+export function Encabezado({
+	variante,
+	agencias,
+	volverA = "/",
+	ancho = "2xl",
+}: Props) {
 	const { data: session } = authClient.useSession();
 
 	if (variante === "caso") {
 		return (
 			<header className="border-slate-200 border-b bg-white">
-				<div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-4">
+				<div
+					className={`mx-auto flex ${ancho === "3xl" ? "max-w-3xl" : "max-w-2xl"} items-center gap-3 px-4 py-4`}
+				>
 					<Link
-						to="/"
+						to={volverA}
 						className="flex flex-1 items-center gap-1.5 text-slate-600 text-sm transition hover:text-slate-900"
 					>
 						<ArrowLeft className="h-4 w-4" />

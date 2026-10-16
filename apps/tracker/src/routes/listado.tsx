@@ -13,6 +13,7 @@ import { BarraPasos } from "@/components/barra-pasos";
 import { Encabezado } from "@/components/encabezado";
 import { authClient } from "@/lib/auth-client";
 import { tieneDocumentosPendientes } from "@/lib/documentos";
+import { TAMANOS_PAGINA } from "@/lib/paginacion";
 import {
 	guardarFiltroPeriodo,
 	leerFiltroPeriodo,
@@ -52,7 +53,6 @@ const MESES = [
 	"Diciembre",
 ];
 
-const TAMANOS_PAGINA = [10, 20, 50, 100];
 
 // Mismo valor y mismo cálculo (UTC, rodante) que MESES_HISTORICO en
 // tracker.ts — si cambia allá, hay que actualizarlo acá también.

@@ -1,6 +1,6 @@
 import "../utils/baseFalsaParaPruebas";
 import { describe, expect, test } from "bun:test";
-import { verificarFotoBoleta, type DepsFotoBoleta, type HeadFoto } from "./boletaTardiaFoto";
+import { verificarFotoBoleta, type DepsFotoBoleta, type HeadFoto, type InicioFoto } from "./boletaTardiaFoto";
 
 const AHORA = new Date("2026-10-13T20:00:00Z");
 const LLAVE = "00000000-0000-4000-8000-000000000001.jpg";
@@ -8,8 +8,12 @@ const INTENTO = "00000000-0000-4000-8000-0000000000aa";
 const entrada = (llaves = [LLAVE]) => ({ credito_id: 1, intento_id: INTENTO, llaves });
 const horasAtras = (h: number) => new Date(AHORA.getTime() - h * 3_600_000);
 const buena = { ContentLength: 12345, ContentType: "image/jpeg", LastModified: horasAtras(1) };
+const bytes = (...partes: (number[] | string)[]) => new Uint8Array(partes.flatMap((p) => (typeof p === "string" ? [...Buffer.from(p, "latin1")] : p)));
+const JPEG = bytes([0xff, 0xd8, 0xff, 0xe0], "JFIF");
+const PNG = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "IHDR");
+const PDF = bytes("%PDF-1.7\n");
 const arma = (head: HeadFoto, extra: Partial<DepsFotoBoleta> = {}): DepsFotoBoleta => ({
-  head, llavesYaUsadas: async () => [], ahora: () => AHORA, timeoutMs: 50, ...extra,
+  head, inicio: async () => JPEG, llavesYaUsadas: async () => [], ahora: () => AHORA, timeoutMs: 50, ...extra,
 });
 const noExiste = () => Object.assign(new Error("no key"), { name: "NotFound", $metadata: { httpStatusCode: 404 } });
 
@@ -145,5 +149,60 @@ describe("verificarFotoBoleta", () => {
     const r = await verificarFotoBoleta(entrada(), arma(async () => buena, { llavesYaUsadas: (_c, _i, _l, s) => { señal = s; return new Promise(() => {}); }, timeoutMs: 30 }));
     expect([r?.status, r?.motivo]).toEqual([503, "timeout"]);
     expect(señal?.aborted).toBe(true);
+  });
+  test("contenido JPEG, PNG o PDF (también PDF con basura antes del encabezado, si se declaró application/pdf): pasa", async () => {
+    for (const inicio of [JPEG, PNG, PDF]) {
+      expect(await verificarFotoBoleta(entrada(), arma(async () => buena, { inicio: async () => inicio }))).toBeNull();
+    }
+    const comoPdf = arma(async () => ({ ...buena, ContentType: "application/pdf" }), { inicio: async () => bytes([1, 2, 3], "%PDF-1.4") });
+    expect(await verificarFotoBoleta(entrada(), comoPdf)).toBeNull();
+  });
+  test("%PDF- fuera del byte 0 sin declarar application/pdf: 400 contenido_invalido", async () => {
+    for (const ContentType of ["image/jpeg", "image/png", "application/octet-stream"]) {
+      const r = await verificarFotoBoleta(entrada(), arma(async () => ({ ...buena, ContentType }), { inicio: async () => bytes("hola, esto es texto %PDF-1.4 en el medio") }));
+      expect([ContentType, r?.status, r?.motivo]).toEqual([ContentType, 400, "contenido_invalido"]);
+    }
+  });
+  test("el contenido no es imagen ni PDF aunque el tipo declarado lo diga: 400 contenido_invalido", async () => {
+    const casos: [string, Uint8Array][] = [
+      ["image/jpeg", bytes("hola")], ["image/png", bytes("<html><body>x</body></html>")], ["application/pdf", bytes([0x50, 0x4b, 0x03, 0x04], "zip")],
+      ["image/jpeg", bytes("MZ\x90\x00")], ["image/jpeg", bytes([0xff, 0xd8])], ["image/png", bytes([0x89, 0x50, 0x4e, 0x47])], ["image/jpeg", new Uint8Array()],
+    ];
+    for (const [ContentType, inicio] of casos) {
+      const r = await verificarFotoBoleta(entrada(), arma(async () => ({ ...buena, ContentType }), { inicio: async () => inicio }));
+      expect([ContentType, r?.status, r?.motivo, r?.llave]).toEqual([ContentType, 400, "contenido_invalido", LLAVE]);
+      expect(r?.message).toBe("La foto de la boleta debe ser una imagen (.jpg, .jpeg, .png) o un PDF.");
+      expect(r?.detalle).toHaveProperty("content_type", ContentType);
+    }
+  });
+  test("lee los primeros bytes de la misma llave, con la misma señal que el HEAD", async () => {
+    const vistas: [string, AbortSignal][] = [];
+    let señalHead: AbortSignal | undefined;
+    await verificarFotoBoleta(entrada(), arma(async (_k, s) => { señalHead = s; return buena; }, { inicio: async (k, s) => { vistas.push([k, s]); return JPEG; } }));
+    expect(vistas.map(([k]) => k)).toEqual([LLAVE]);
+    expect(vistas[0][1]).toBe(señalHead!);
+  });
+  test("si el HEAD ya rechazó, no se leen los bytes", async () => {
+    let n = 0;
+    const inicio: InicioFoto = async () => { n++; return JPEG; };
+    await verificarFotoBoleta(entrada(), arma(async () => ({ ...buena, ContentLength: 0 }), { inicio }));
+    await verificarFotoBoleta(entrada(), arma(async () => { throw noExiste(); }, { inicio }));
+    expect(n).toBe(0);
+  });
+  test("la lectura de bytes falla: 503 (falla cerrado); si R2 dice que no existe, 400 no_existe", async () => {
+    const e500 = Object.assign(new Error("SECRETO"), { name: "InternalError", $metadata: { httpStatusCode: 500 } });
+    let r = await verificarFotoBoleta(entrada(), arma(async () => buena, { inicio: async () => { throw e500; } }));
+    expect([r?.status, r?.motivo, r?.message]).toEqual([503, "error_r2", "No se pudo verificar la foto de la boleta; intente de nuevo o registre sin condonación"]);
+    expect(JSON.stringify(r)).not.toContain("SECRETO");
+    r = await verificarFotoBoleta(entrada(), arma(async () => buena, { inicio: async () => { throw Object.assign(new Error("x"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } }); } }));
+    expect([r?.status, r?.motivo]).toEqual([400, "no_existe"]);
+  });
+  test("la lectura de bytes colgada: el mismo tope corta y responde 503 timeout", async () => {
+    const t0 = Date.now();
+    const r = await verificarFotoBoleta(entrada(), arma(async () => buena, {
+      inicio: (_k, signal) => new Promise((_res, rej) => signal.addEventListener("abort", () => rej(new Error("abortado")))), timeoutMs: 30,
+    }));
+    expect([r?.status, r?.motivo]).toEqual([503, "timeout"]);
+    expect(Date.now() - t0).toBeLessThan(1000);
   });
 });

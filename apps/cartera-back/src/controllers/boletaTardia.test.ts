@@ -247,7 +247,7 @@ describe("la foto de la boleta se verifica en R2 ANTES del candado", () => {
       for (const [motivo, ajuste, status, evento, pista] of casos) {
         const logs: string[] = [];
         console.error = (m: string) => { logs.push(String(m)); };
-        const fotoDeps: DepsFotoBoleta = { head: async () => buena, llavesYaUsadas: async () => [], ahora: () => ahora, ...ajuste };
+        const fotoDeps: DepsFotoBoleta = { head: async () => buena, inicio: async () => new Uint8Array([0xff, 0xd8, 0xff]), llavesYaUsadas: async () => [], ahora: () => ahora, ...ajuste };
         const set: { status?: number } = {};
         await registrarPagoConBoletaTardia({ body: cuerpo(), set }, { usuarioEmail: "a@x.com" }, sinLock((e) => verificarFotoBoleta(e, fotoDeps)));
         expect([motivo, set.status]).toEqual([motivo, status]);

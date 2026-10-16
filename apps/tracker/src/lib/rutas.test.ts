@@ -29,4 +29,17 @@ describe("rutaDeRetorno", () => {
 		expect(rutaDeRetorno("/login", ORIGIN)).toBe("/");
 		expect(rutaDeRetorno("/caso/no-es-uuid", ORIGIN)).toBe("/");
 	});
+
+	test("permite perfil, usuarios y el detalle de un usuario", () => {
+		const uuid = "550e8400-e29b-41d4-a716-446655440000";
+		expect(rutaDeRetorno("/perfil", ORIGIN)).toBe("/perfil");
+		expect(rutaDeRetorno("/usuarios", ORIGIN)).toBe("/usuarios");
+		expect(rutaDeRetorno(`/usuarios/${uuid}`, ORIGIN)).toBe(`/usuarios/${uuid}`);
+	});
+
+	test("rechaza variantes de perfil y usuarios que no existen", () => {
+		expect(rutaDeRetorno("/usuarios/no-es-uuid", ORIGIN)).toBe("/");
+		expect(rutaDeRetorno("/perfil/otro", ORIGIN)).toBe("/");
+		expect(rutaDeRetorno("//attacker.example/perfil", ORIGIN)).toBe("/");
+	});
 });

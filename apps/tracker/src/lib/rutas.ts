@@ -1,5 +1,7 @@
-const RUTA_CASO =
-	/^\/caso\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const RUTA_CASO = new RegExp(`^/caso/${UUID}$`, "i");
+const RUTA_USUARIO = new RegExp(`^/usuarios/${UUID}$`, "i");
+const RUTAS_FIJAS = new Set(["/", "/perfil", "/usuarios"]);
 
 export function rutaDeRetorno(
 	redirect: string | undefined,
@@ -9,11 +11,11 @@ export function rutaDeRetorno(
 
 	try {
 		const destino = new URL(redirect, origin);
-		const esRutaCaso = RUTA_CASO.test(destino.pathname);
-		if (
-			destino.origin !== origin ||
-			(destino.pathname !== "/" && !esRutaCaso)
-		) {
+		const permitida =
+			RUTAS_FIJAS.has(destino.pathname) ||
+			RUTA_CASO.test(destino.pathname) ||
+			RUTA_USUARIO.test(destino.pathname);
+		if (destino.origin !== origin || !permitida) {
 			return "/";
 		}
 

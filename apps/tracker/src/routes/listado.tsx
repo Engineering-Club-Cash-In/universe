@@ -5,14 +5,13 @@ import {
 	ChevronRight,
 	FileWarning,
 	Loader2,
-	LogOut,
 	Search,
 	X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { logo } from "@/assets";
 import { BarraPasos } from "@/components/barra-pasos";
-import { authClient, cerrarSesion } from "@/lib/auth-client";
+import { Encabezado } from "@/components/encabezado";
+import { authClient } from "@/lib/auth-client";
 import { tieneDocumentosPendientes } from "@/lib/documentos";
 import {
 	guardarFiltroPeriodo,
@@ -306,38 +305,15 @@ export function ListadoPage() {
 
 	return (
 		<div className="min-h-screen bg-slate-50">
-			<header className="sticky top-0 z-10 border-slate-200 border-b bg-white">
-				<div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
-					<img src={logo} alt="CCI" className="h-8 w-auto shrink-0" />
-					<div className="min-w-0 flex-1">
-						<h1 className="truncate font-bold text-lg text-slate-900">
-							Seguimiento de Créditos
-						</h1>
-						<p className="truncate text-slate-500 text-xs">
-							{session?.user.email}
-						</p>
-					</div>
-					<div className="min-w-0 flex-1 text-center">
-						<p className="text-slate-400 text-[10px] uppercase tracking-wide">
-							Agencia/predio
-						</p>
-						<p className="truncate font-medium text-slate-700 text-xs">
-							{agenciasQuery.isPending
-								? "Cargando..."
-								: agenciasQuery.data?.map((agencia) => agencia.name).join(", ") ||
-									"Sin agencia asignada"}
-						</p>
-					</div>
-					<button
-						type="button"
-						onClick={() => cerrarSesion(identificadorSocio)}
-						className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 text-sm transition hover:bg-slate-50"
-					>
-						<LogOut className="h-4 w-4" />
-						<span className="hidden sm:inline">Salir</span>
-					</button>
-				</div>
-			</header>
+			<Encabezado
+				variante="listado"
+				agencias={
+					agenciasQuery.isPending
+						? "Cargando..."
+						: agenciasQuery.data?.map((agencia) => agencia.name).join(", ") ||
+							"Sin agencia asignada"
+				}
+			/>
 
 			<main className="mx-auto max-w-3xl space-y-4 px-4 py-5">
 				<div className="flex flex-col gap-3 sm:flex-row">

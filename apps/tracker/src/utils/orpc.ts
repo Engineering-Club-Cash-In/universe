@@ -23,9 +23,31 @@ export const esErrorDeAcceso = (error: Error): boolean =>
 export const esForbidden = (error: Error): boolean =>
 	error instanceof ORPCError && error.status === 403;
 
+// Una consulta que muestra su propio "No tienes acceso" pide callar el aviso global.
+// Una que pinta su propio estado de error (tarjeta) pide callar cualquier aviso,
+// salvo la sesión expirada, que siempre redirige al login.
+export const silenciaAvisoGlobal = (
+	error: Error,
+	meta: Record<string, unknown> | undefined,
+): boolean =>
+	(meta?.sinAvisoDeAcceso === true && esForbidden(error)) ||
+	(meta?.sinAvisoDeError === true && !esErrorDeSesion(error));
+
+// Para consultas con tarjeta de error propia: tras un fallo no se vuelve a
+// consultar sola cada minuto (el usuario reintenta con su botón) y un 403/404
+// tampoco se reintenta, porque repetirlo no lo cambia.
+export const sinRepetirSiFalla = {
+	refetchInterval: (query: { state: { status: string } }) =>
+		query.state.status === "error" ? (false as const) : 60_000,
+	retry: (intentos: number, error: Error) =>
+		intentos < 1 &&
+		!(error instanceof ORPCError && (error.status === 403 || error.status === 404)),
+};
+
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
-		onError: (error) => {
+		onError: (error, query) => {
+			if (silenciaAvisoGlobal(error, query.meta)) return;
 			if (esErrorDeSesion(error)) {
 				toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
 				window.location.href = "/login";

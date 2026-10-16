@@ -15,6 +15,8 @@ export const crmAuditEntityTypeEnum = pgEnum("crm_audit_entity_type", [
 	"lead",
 	"opportunity",
 	"vehicle",
+	// Altas, ediciones y (des)activaciones de socios y sus membresías.
+	"partner_member",
 ]);
 
 // Desde dónde vino la escritura. `crm` = un usuario logueado vía /rpc;

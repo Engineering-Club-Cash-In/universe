@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { user } from "../db/schema/auth";
 import { companies } from "../db/schema/crm";
 import { partnerMembers } from "../db/schema/partners";
+import { vehicleVendors } from "../db/schema/vehicles";
 import { ROLES } from "./roles";
 
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -10,6 +11,8 @@ let rolDelUsuario: string | null = ROLES.PARTNER;
 let agenciasQueExisten = [A, B];
 let membresiasActuales: Array<Record<string, unknown>> = [];
 let insertados: Array<Record<string, unknown>> = [];
+let ligadosAVendedores: Array<{ userId: string; sellerId: string }> = [];
+const VENDEDOR = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 function nodo<T>(filas: () => T[]) {
 	const n = {
@@ -23,8 +26,14 @@ function nodo<T>(filas: () => T[]) {
 }
 
 const tx = {
-	select: () => ({
+	select: (seleccion: Record<string, unknown>) => ({
 		from: (tabla: unknown) => {
+			if (tabla === vehicleVendors)
+				return nodo(() => [
+					{ id: VENDEDOR, vendorType: "agencia", companyId: A },
+				]);
+			if (tabla === partnerMembers && "sellerId" in seleccion)
+				return nodo(() => ligadosAVendedores);
 			if (tabla === user)
 				return nodo(() => (rolDelUsuario ? [{ role: rolDelUsuario }] : []));
 			if (tabla === companies)
@@ -50,6 +59,7 @@ beforeEach(() => {
 	agenciasQueExisten = [A, B];
 	membresiasActuales = [];
 	insertados = [];
+	ligadosAVendedores = [];
 });
 
 describe("asignarAgencias", () => {
@@ -96,6 +106,27 @@ describe("asignarAgencias", () => {
 				{ companyId: A, sellerId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
 			]),
 		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+	});
+});
+
+describe("exclusividad del vendedor", () => {
+	test("un vendedor ligado a otro usuario da CONFLICT y no borra ni inserta", async () => {
+		agenciasQueExisten = [A];
+		ligadosAVendedores = [{ userId: "otro", sellerId: VENDEDOR }];
+		await expect(
+			asignarAgencias("socio-1", [{ companyId: A, sellerId: VENDEDOR }]),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message: "Ese vendedor ya está ligado a otra cuenta",
+		});
+		expect(insertados).toHaveLength(0);
+	});
+
+	test("reasignarle al mismo usuario su propio vendedor pasa", async () => {
+		agenciasQueExisten = [A];
+		ligadosAVendedores = [{ userId: "socio-1", sellerId: VENDEDOR }];
+		await asignarAgencias("socio-1", [{ companyId: A, sellerId: VENDEDOR }]);
+		expect(insertados[0]).toMatchObject({ companyId: A, sellerId: VENDEDOR });
 	});
 });
 

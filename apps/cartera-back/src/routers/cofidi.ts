@@ -40,7 +40,7 @@ import {
   SAT_CONFIG,
   getInversionistaFacturadorConfig,
 } from "../utils/functions/const";
-import { EMISORES, emisorPorClave, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales, logoUrlEmisor } from "../cofidi/emisores";
+import { EMISORES, emisorPorClave, emisorPorNit, emisoresParaSelector, emisoresParaAnular, complementosFacturaGenerica, emisorTieneCredenciales, logoUrlEmisor } from "../cofidi/emisores";
 
 type FacturadorConfig = Pick<DTERequest, "emisor" | "tipoDocumento" | "codigoMoneda" | "frases">;
 type FacturarGenericoItem = {
@@ -2380,7 +2380,8 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         factura_fecha_anulacion: facturas_electronicas.fecha_anulacion,
         factura_motivo_anulacion: facturas_electronicas.motivo_anulacion,
         factura_tipo_documento: facturas_electronicas.tipo_documento,
-        
+        factura_emisor_nit: facturas_electronicas.emisor_nit,
+
         // Datos del pago
         pago_id: pagos_credito.pago_id,
         pago_fecha: pagos_credito.fecha_pago,
@@ -2547,13 +2548,27 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
     // ============================================
     // 6️⃣ ANULAR EN COFIDI/SAT (detectar emisor automáticamente)
     // ============================================
-    console.log('📡 Intentando anulación con cada emisor...');
+    const emisoresAIntentar = emisoresParaAnular(facturaCompleta.factura_emisor_nit);
+    if (emisoresAIntentar.length === 0) {
+      const duena = emisorPorNit(facturaCompleta.factura_emisor_nit);
+      set.status = 422;
+      return {
+        success: false,
+        mensaje: duena
+          ? `No se puede anular: el emisor ${duena.nombre} no tiene credenciales de COFIDI configuradas.`
+          : "No se puede anular: ningún emisor tiene credenciales de COFIDI configuradas.",
+        error: "EMISOR_SIN_CREDENCIALES",
+      };
+    }
+
+    console.log(`📡 Emisores a intentar: ${emisoresAIntentar.map((e) => e.clave).join(", ")} (emisor_nit de la factura: ${facturaCompleta.factura_emisor_nit ?? "sin dato"})`);
 
     let resultado: any = null;
+    let ultimoErrorConexion = "";
     let emisorUsado = "";
     let xmlAnulacion = "";
 
-    for (const { clave: emisorKey, config, satConfig } of EMISORES) {
+    for (const { clave: emisorKey, config, satConfig } of emisoresAIntentar) {
       const emisorConf = { config, satConfig };
       const nitEmisor = emisorConf.config.emisor.nit;
 
@@ -2598,12 +2613,28 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         }
         console.log(`   ❌ ${emisorKey}: ${resultado.descripcion || 'No anulado'}`);
       } catch (e) {
+        ultimoErrorConexion = `${emisorKey}: ${(e as Error).message}`;
         console.log(`   ❌ ${emisorKey}: Error - ${(e as Error).message}`);
       }
     }
 
+    // 🔥 VALIDACIÓN: COFIDI no respondió (red/500). Antes caía en
+    //    `resultado.descripcion` con resultado=null y reventaba con un 500 genérico.
+    if (!resultado) {
+      set.status = 502;
+      return {
+        success: false,
+        mensaje: 'No se pudo comunicar con COFIDI para anular la factura. Intente de nuevo en unos minutos.',
+        error: 'COFIDI_SIN_RESPUESTA',
+        detalle: {
+          emisores_intentados: emisoresAIntentar.map((e) => e.clave),
+          ultimo_error: ultimoErrorConexion,
+        },
+      };
+    }
+
     // 🔥 VALIDACIÓN: Error en COFIDI
-    if (!resultado || !resultado.anulado) {
+    if (!resultado.anulado) {
       console.error('❌ COFIDI rechazó la anulación');
       console.error('📋 Respuesta:', resultado);
       
@@ -3611,6 +3642,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         //    NO afecta la facturación). Solo para items que traen `rubro_desglose`.
         //    La categoría (columna de producto del reporte) se resuelve por el NIT
         //    del receptor → usuario con créditos → usuarios.categoria.
+        //    Los emisores con entraAlReporteDiario=false (CHECKIN) no suman: no es ingreso de Cash In.
         try {
           const RUBROS_VALIDOS = new Set([
             "CAPITAL", "INTERES", "MEMBRESIA", "SEGURO", "GPS",
@@ -3621,7 +3653,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
               it.rubro_desglose &&
               RUBROS_VALIDOS.has(String(it.rubro_desglose).toUpperCase())
           );
-          if (itemsConRubro.length > 0 && resultado.factura_id) {
+          if (itemsConRubro.length > 0 && resultado.factura_id && emisorEntry.entraAlReporteDiario) {
             // Categoría del receptor: usuario (con créditos) por NIT; el del crédito más reciente.
             const catRes = await db.execute(sql`
               SELECT u.categoria
@@ -4457,7 +4489,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
       if (errorMessage.includes("Cuenta no se encuentra activa")) {
         throw new Error(
-          `La cuenta del emisor (NIT: ${CLUB_CASHIN_CONFIG.emisor.nit}) no está activa en COFIDI. ` +
+          `La cuenta del emisor (NIT: ${emisorConfig.emisor.nit}) no está activa en COFIDI. ` +
             `Por favor contacte a COFIDI para activar la cuenta antes de generar facturas.`
         );
       }
@@ -4465,7 +4497,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       if (errorMessage.includes("Error encontrado en usuario")) {
         throw new Error(
           `Las credenciales de certificación no son válidas. ` +
-            `Verifique con COFIDI que el usuario '${SAT_CONFIG.user}' tenga permisos activos.`
+            `Verifique con COFIDI que el usuario '${satConfig.user}' tenga permisos activos.`
         );
       }
 

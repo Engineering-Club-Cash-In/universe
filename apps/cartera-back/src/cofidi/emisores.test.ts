@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { EMISORES, emisorPorClave, emisorPorNit, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales, logoUrlEmisor } from "./emisores";
+import { EMISORES, emisorPorClave, emisorPorNit, emisoresParaSelector, emisoresParaAnular, complementosFacturaGenerica, emisorTieneCredenciales, logoUrlEmisor } from "./emisores";
 import {
   AMJK_CONFIG,
   AMJK_SAT_CONFIG,
@@ -83,6 +83,13 @@ describe("EMISORES registro", () => {
     expect(checkin.satConfig).toBe(CHECKIN_SAT_CONFIG);
     expect(checkin.bienOServicio).toBe("S");
   });
+
+  it("entraAlReporteDiario es true para las 6 de siempre, false para CHECKIN", () => {
+    for (let i = 0; i < 6; i++) {
+      expect(EMISORES[i].entraAlReporteDiario).toBe(true);
+    }
+    expect(EMISORES[6].entraAlReporteDiario).toBe(false);
+  });
 });
 
 describe("emisorPorNit", () => {
@@ -156,8 +163,12 @@ describe("emisorPorClave", () => {
 });
 
 describe("emisoresParaSelector", () => {
-  it("devuelve las 6 + CHECKIN en el orden exacto", () => {
-    const resultado = emisoresParaSelector();
+  // Helper para crear emisores mock con credenciales
+  const conCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: "r", userName: "u", endpointUrl: "https://x" } });
+  const sinCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: undefined as any, userName: undefined as any, endpointUrl: undefined as any } });
+
+  it("con todos con credenciales: devuelve las 7 en el orden exacto", () => {
+    const resultado = emisoresParaSelector(EMISORES.map(conCred));
     expect(resultado).toEqual([
       { clave: "CUBE", nombre: "CUBE" },
       { clave: "SE_PRESTA", nombre: "Se Presta" },
@@ -166,6 +177,19 @@ describe("emisoresParaSelector", () => {
       { clave: "GRUPO_BATRO", nombre: "Grupo Batro" },
       { clave: "AUTOCASH", nombre: "AutoCash" },
       { clave: "CHECKIN", nombre: "Checkin (MotorLab)" },
+    ]);
+  });
+
+  it("si CHECKIN sin credenciales: devuelve solo las 6", () => {
+    const lista = [...EMISORES.slice(0, 6).map(conCred), sinCred(EMISORES[6])];
+    const resultado = emisoresParaSelector(lista);
+    expect(resultado).toEqual([
+      { clave: "CUBE", nombre: "CUBE" },
+      { clave: "SE_PRESTA", nombre: "Se Presta" },
+      { clave: "AMJK", nombre: "AMJK" },
+      { clave: "CREACION_IMAGEN", nombre: "Creación Imagen" },
+      { clave: "GRUPO_BATRO", nombre: "Grupo Batro" },
+      { clave: "AUTOCASH", nombre: "AutoCash" },
     ]);
   });
 });
@@ -235,11 +259,11 @@ describe("complementosFacturaGenerica", () => {
 });
 
 describe("emisorTieneCredenciales", () => {
-  it("devuelve true si requestor y endpointUrl están presentes", () => {
+  it("devuelve true si los tres (requestor, userName, endpointUrl) están presentes", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "req", endpointUrl: "https://test.com" },
+      satConfig: { requestor: "req", userName: "user", endpointUrl: "https://test.com" },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(true);
@@ -249,7 +273,47 @@ describe("emisorTieneCredenciales", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "", endpointUrl: "https://test.com" },
+      satConfig: { requestor: "", userName: "user", endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si userName es undefined", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "req", userName: undefined, endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si userName es solo espacios", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "req", userName: "   ", endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si requestor es solo espacios", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "  ", userName: "user", endpointUrl: "https://test.com" },
+      bienOServicio: "B",
+    };
+    expect(emisorTieneCredenciales(testEmisor)).toBe(false);
+  });
+
+  it("devuelve false si endpointUrl es solo espacios", () => {
+    const testEmisor: any = {
+      clave: "TEST",
+      config: {},
+      satConfig: { requestor: "req", userName: "user", endpointUrl: " " },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
@@ -259,7 +323,7 @@ describe("emisorTieneCredenciales", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "req", endpointUrl: "" },
+      satConfig: { requestor: "req", userName: "user", endpointUrl: "" },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
@@ -269,7 +333,7 @@ describe("emisorTieneCredenciales", () => {
     const testEmisor: any = {
       clave: "TEST",
       config: {},
-      satConfig: { requestor: "", endpointUrl: "" },
+      satConfig: { requestor: "", userName: "", endpointUrl: "" },
       bienOServicio: "B",
     };
     expect(emisorTieneCredenciales(testEmisor)).toBe(false);
@@ -323,5 +387,65 @@ describe("logoUrlEmisor", () => {
   it("CHECKIN tiene logoEnv === 'CHECKIN_LOGO_URL'", () => {
     const checkin = emisorPorNit("120310546");
     expect(checkin?.logoEnv).toBe("CHECKIN_LOGO_URL");
+  });
+});
+
+describe("emisoresParaAnular", () => {
+  // Helper para crear emisores mock con credenciales
+  const conCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: "r", userName: "u", endpointUrl: "https://x" } });
+  const sinCred = (e: any) => ({ ...e, satConfig: { ...e.satConfig, requestor: undefined as any, userName: undefined as any, endpointUrl: undefined as any } });
+
+  it("NIT de AMJK con credenciales: devuelve solo AMJK", () => {
+    const lista = EMISORES.map(conCred);
+    const resultado = emisoresParaAnular("100691455", lista);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].clave).toBe("AMJK");
+  });
+
+  it("NIT de CHECKIN con credenciales: devuelve solo CHECKIN", () => {
+    const lista = EMISORES.map(conCred);
+    const resultado = emisoresParaAnular("120310546", lista);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].clave).toBe("CHECKIN");
+  });
+
+  it("NIT null/undefined con credenciales: devuelve todas las 7", () => {
+    const lista = EMISORES.map(conCred);
+    const r1 = emisoresParaAnular(null, lista);
+    const r2 = emisoresParaAnular(undefined, lista);
+    const r3 = emisoresParaAnular("", lista);
+    expect(r1).toHaveLength(7);
+    expect(r2).toHaveLength(7);
+    expect(r3).toHaveLength(7);
+    expect(r1.map((e) => e.clave).join(",")).toBe("CUBE,SE_PRESTA,AMJK,CREACION_IMAGEN,GRUPO_BATRO,AUTOCASH,CHECKIN");
+  });
+
+  it("NIT 999 no registrado con credenciales: devuelve todas las 7", () => {
+    const lista = EMISORES.map(conCred);
+    const resultado = emisoresParaAnular("999", lista);
+    expect(resultado).toHaveLength(7);
+  });
+
+  it("NIT null sin credenciales en lista: devuelve solo los 6 con credenciales", () => {
+    const lista = [...EMISORES.slice(0, 6).map(conCred), sinCred(EMISORES[6])];
+    const resultado = emisoresParaAnular(null, lista);
+    expect(resultado).toHaveLength(6);
+    expect(resultado.every((e) => e.clave !== "CHECKIN")).toBe(true);
+  });
+
+  it("NIT de CHECKIN sin credenciales en lista: devuelve lista vacía", () => {
+    const lista = [...EMISORES.slice(0, 6).map(conCred), sinCred(EMISORES[6])];
+    const resultado = emisoresParaAnular("120310546", lista);
+    expect(resultado).toHaveLength(0);
+  });
+
+  it("NIT de AMJK sin credenciales en lista: devuelve lista vacía", () => {
+    const lista = [
+      ...EMISORES.slice(0, 2).map(conCred),
+      sinCred(EMISORES[2]), // AMJK sin cred
+      ...EMISORES.slice(3).map(conCred),
+    ];
+    const resultado = emisoresParaAnular("100691455", lista);
+    expect(resultado).toHaveLength(0);
   });
 });

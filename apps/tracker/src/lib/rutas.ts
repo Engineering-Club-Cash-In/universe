@@ -1,6 +1,7 @@
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const RUTA_CASO = new RegExp(`^/caso/${UUID}$`, "i");
-const RUTA_USUARIO = new RegExp(`^/usuarios/${UUID}$`, "i");
+// Los usuarios usan el id de better-auth (texto alfanumérico), no un uuid.
+const RUTA_USUARIO = /^\/usuarios\/[A-Za-z0-9_-]{16,64}$/;
 const RUTAS_FIJAS = new Set(["/", "/perfil", "/usuarios"]);
 
 export function rutaDeRetorno(

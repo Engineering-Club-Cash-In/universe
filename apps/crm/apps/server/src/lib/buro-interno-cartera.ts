@@ -117,7 +117,7 @@ const PREFIJO_CONTEXTO_NO_RIESGO =
 const PREFIJO_PROBLEMAS_NEGADOS =
 	/(?:^|\s)no\s+(?:tiene|presenta|presento|hay|hubo|existen?)\s+(?:ningun[ao]?\s+)?problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
-	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|hay|existe(?:n)?|presenta|presento|cuenta\s+con))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
+	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|tenia|tuvo|hay|habia|hubo|existe(?:n)?|existia(?:n)?|presenta|presentaba|presento|cuenta\s+con|contaba\s+con|posee|poseia|adeuda|adeudaba|debe|debia|registra|registraba|reporta|reportaba|mantiene|mantenia))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
 // "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
 // También "sin (haber) incurrido / caído / entrado en mora".
 const VERBO_ESTADO_EN =

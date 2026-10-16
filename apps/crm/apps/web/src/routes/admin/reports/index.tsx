@@ -531,13 +531,6 @@ function RouteComponent() {
 		}),
 		enabled: canAccessCobranzaReport && officialMoraRequired,
 	});
-	const officialMoraReady =
-		!officialMoraRequired ||
-		(officialMoraQuery.isSuccess && officialMoraQuery.data !== null);
-	const officialMoraFailed =
-		officialMoraRequired &&
-		(officialMoraQuery.isError ||
-			(officialMoraQuery.isSuccess && officialMoraQuery.data === null));
 	const officialMoraPending =
 		officialMoraRequired && officialMoraQuery.isPending;
 	const montoCobrarData = montoCobrarQuery.data as
@@ -1451,19 +1444,22 @@ function RouteComponent() {
 											Error al cargar el reporte de monto a cobrarse.
 										</p>
 									)}
-									{officialMoraFailed && (
-										<p className="text-destructive">
-											No fue posible cargar la mora oficial del mes. Intenta de nuevo.
+									{!!montoCobrarData?.data.length && !officialMoraPending && officialMoraMissing && (
+										<p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
+											{/* Un fallo de carga no es lo mismo que no tener cierre: decir "sin cierre" invita a reimportarlo. */}
+											{officialMoraQuery.isError
+												? "No se pudo cargar el cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera."
+												: "Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera."}
 										</p>
 									)}
-									{officialMoraReady &&
+									{!officialMoraPending &&
 										montoCobrarData &&
 										montoCobrarData.data.length === 0 && (
 										<p className="text-muted-foreground">
 											No hay cuotas pendientes para el rango seleccionado.
 										</p>
 									)}
-									{officialMoraReady && !!montoCobrarData?.data.length && (
+									{!officialMoraPending && !!montoCobrarData?.data.length && (
 										<>
 											{(() => {
 											const totals = getMontoACobrarParticipacionTotals(

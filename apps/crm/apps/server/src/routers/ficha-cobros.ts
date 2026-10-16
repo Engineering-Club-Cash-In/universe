@@ -59,6 +59,10 @@ import {
 	estadoGestionDe,
 } from "../lib/seguimiento-cobros";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import {
+	buscarCreditosRelacionados,
+	resumenCreditoRelacionado,
+} from "../services/creditos-relacionados-cobros";
 import { resolverContextoCaso } from "../services/referencias-cobros-datos";
 import {
 	assertAccesoCasoCobro,
@@ -427,5 +431,57 @@ export const fichaCobrosRouter = {
 				leidaPor: context.userId,
 			});
 			return { marcada: true as boolean };
+		}),
+
+	/**
+	 * Card «Créditos relacionados»: otros créditos del titular, de sus
+	 * codeudores o de una referencia (por teléfono o por nombre exacto). Cada
+	 * uno dice si el usuario puede abrir su ficha (`puedeAbrir`, mismo gate
+	 * que la ficha) o si solo ve el resumen del modal.
+	 */
+	getCreditosRelacionados: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const ctx = await resolverContextoCaso(input.casoCobroId);
+			return buscarCreditosRelacionados({
+				ctx,
+				userId: context.userId,
+				userRole: context.userRole,
+			});
+		}),
+
+	/**
+	 * El modal de un crédito relacionado que el usuario no puede abrir. Solo
+	 * datos del crédito (estado, saldo, cuota, asesor): nada de contacto.
+	 */
+	getResumenCreditoRelacionado: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				numeroSifco: z.string().trim().min(1).max(50),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const ctx = await resolverContextoCaso(input.casoCobroId);
+			const resumen = await resumenCreditoRelacionado({
+				ctx,
+				numeroSifco: input.numeroSifco,
+			});
+			if (!resumen) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "El crédito no está relacionado con este caso.",
+				});
+			}
+			return resumen;
 		}),
 };

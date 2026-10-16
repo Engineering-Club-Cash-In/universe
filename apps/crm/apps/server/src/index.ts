@@ -50,17 +50,7 @@ import {
 } from "./lib/partner-auth";
 import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
-import { agencyManagersRouter } from "./routers/agency-managers";
-import { cartaPoderRouter } from "./routers/carta-poder";
-import {
-	appRouter,
-	buroInternoProcedures,
-	disbursementRouter,
-	manualVehicleRouter,
-	partnerTrackerRouter,
-	proyeccionRouter,
-} from "./routers/index";
-import { investmentsRouter } from "./routers/investments";
+import { routersDelHandler } from "./routers/handler-routers";
 import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
 import carteraEstadoCuentaRouter from "./routes/cartera-estado-cuenta";
 import externalContractsRouter from "./routes/external-contracts";
@@ -224,20 +214,7 @@ app.route("/api/investor-contracts/compra-aceptada", carteraCompraAceptadaRouter
 // cuenta que emite al solicitar la cancelación de un crédito.
 app.route("/api/cartera/estado-cuenta", carteraEstadoCuentaRouter);
 
-const handler = new RPCHandler(
-	Object.assign(
-		{},
-		appRouter,
-		manualVehicleRouter,
-		investmentsRouter,
-		disbursementRouter,
-		proyeccionRouter,
-		partnerTrackerRouter,
-		buroInternoProcedures,
-		cartaPoderRouter,
-		agencyManagersRouter,
-	),
-);
+const handler = new RPCHandler(Object.assign({}, ...routersDelHandler));
 app.use("/rpc/*", limiteFacturaSeguro());
 
 app.use("/rpc/*", async (c, next) => {

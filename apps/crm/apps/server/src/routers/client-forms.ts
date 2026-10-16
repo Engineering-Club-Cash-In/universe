@@ -35,9 +35,17 @@ function normalizarDpiDelFormulario<T extends { dpi?: string }>(datos: T): T {
 }
 
 // Relaxed server-side validation schemas (all fields optional, only validates types)
+
+/**
+ * El formulario manda 3 referencias por lista; el tope es holgado y frena un
+ * envío público con miles, que después no se podría revisar.
+ */
+export const MAX_REFERENCIAS_POR_LISTA = 10;
+
 const referenciaCrediticiaServerSchema = z.object({
 	nombre: z.string().optional(),
 	telefono: z.string().optional(),
+	dpi: z.string().optional(),
 });
 
 const cuentaBancariaServerSchema = z.object({
@@ -50,9 +58,10 @@ const referenciaPersonalServerSchema = z.object({
 	nombre: z.string().optional(),
 	relacion: z.string().optional(),
 	telefono: z.string().optional(),
+	dpi: z.string().optional(),
 });
 
-const creditApplicationServerSchema = z.object({
+export const creditApplicationServerSchema = z.object({
 	primerApellido: z.string().optional(),
 	segundoApellido: z.string().optional(),
 	apellidoCasada: z.string().optional(),
@@ -101,9 +110,15 @@ const creditApplicationServerSchema = z.object({
 	conyugeDireccion: z.string().optional(),
 	conyugeTelOficina: z.string().optional(),
 	conyugeTelMovil: z.string().optional(),
-	referenciasCrediticias: z.array(referenciaCrediticiaServerSchema).optional(),
+	referenciasCrediticias: z
+		.array(referenciaCrediticiaServerSchema)
+		.max(MAX_REFERENCIAS_POR_LISTA)
+		.optional(),
 	cuentasBancarias: z.array(cuentaBancariaServerSchema).optional(),
-	referenciasPersonales: z.array(referenciaPersonalServerSchema).optional(),
+	referenciasPersonales: z
+		.array(referenciaPersonalServerSchema)
+		.max(MAX_REFERENCIAS_POR_LISTA)
+		.optional(),
 	esPep: z.boolean().optional(),
 	comoSeEntero: z.string().optional(),
 	utilizacionCredito: z.string().optional(),

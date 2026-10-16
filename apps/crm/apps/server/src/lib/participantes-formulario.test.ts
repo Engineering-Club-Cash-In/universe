@@ -3,6 +3,8 @@ import {
 	armarParticipantes,
 	claveDeFormulario,
 	nombreDelFormulario,
+	participantesDeLaAlerta,
+	personasPropias,
 } from "./participantes-formulario";
 
 const OPP = "opp-1";
@@ -200,5 +202,127 @@ describe("el nombre del formulario: la solicitud antes que el estado patrimonial
 			...conLosDos(null, null),
 		});
 		expect(p.get(`legacy:${OPP}`)?.displayName).toBe("DeLaSolicitud");
+	});
+});
+
+describe("participantesDeLaAlerta", () => {
+	const base = {
+		opportunityId: OPP,
+		lead: titular,
+		coDebtors: [codeudor("c1", "Carlos"), codeudor("c2", "Dora")],
+		creditRows: [],
+		financialRows: [],
+	};
+
+	test("quien dejó solicitud y ya no figura sale como histórico aunque no tenga enlace", () => {
+		const p = participantesDeLaAlerta({
+			...base,
+			creditRows: [
+				fila({
+					personType: "coDebtor",
+					personId: "borrado",
+					primerNombre: "Sin Enlace",
+				}),
+				fila({ personType: "lead", personId: "viejo" }),
+			],
+		});
+		expect(p.get("coDebtor:borrado")).toMatchObject({
+			displayName: "Sin Enlace",
+			roleLabel: "Co-firmante historico",
+			canGenerateLink: false,
+		});
+		expect(p.get("lead:viejo")).toMatchObject({
+			displayName: "Titular historico",
+			roleLabel: "Titular historico",
+		});
+	});
+
+	test("mismo orden que las tarjetas: titular, codeudores en su orden, históricos y sin dueño", () => {
+		const p = participantesDeLaAlerta({
+			...base,
+			creditRows: [
+				fila({ primerNombre: "Legado" }),
+				fila({ personType: "coDebtor", personId: "borrado" }),
+				fila({ personType: "coDebtor", personId: "c2" }),
+				fila({ personType: "lead", personId: "lead-1" }),
+			],
+		});
+		expect([...p.keys()]).toEqual([
+			"lead:lead-1",
+			"coDebtor:c1",
+			"coDebtor:c2",
+			"coDebtor:borrado",
+			`legacy:${OPP}`,
+		]);
+		// los vigentes se nombran igual que en las tarjetas
+		expect(p.get("lead:lead-1")?.displayName).toBe("Ana López");
+		expect(p.get("coDebtor:c2")?.roleLabel).toBe("Co-firmante 2");
+	});
+});
+
+describe("personasPropias", () => {
+	test("titular, codeudores vigentes e históricos de solicitud, con sus leads y todos sus DPI", () => {
+		const propias = personasPropias({
+			opportunityId: OPP,
+			lead: { ...titular, dpi: "DPI-LEAD" },
+			coDebtors: [{ ...codeudor("c1", "Carlos"), dpi: "DPI-CODEUDOR" }],
+			creditRows: [
+				fila({
+					personType: "lead",
+					personId: "lead-1",
+					dpi: "DPI-ESCRITO-TITULAR",
+				}),
+				fila({ personType: "coDebtor", personId: "c1", dpi: null }),
+				fila({ personType: "lead", personId: "viejo", dpi: " DPI-HISTORICO " }),
+				fila({
+					personType: "coDebtor",
+					personId: "borrado",
+					dpi: "DPI-BORRADO",
+				}),
+				fila({ dpi: "DPI-LEGADO" }),
+			],
+		});
+		expect(propias.leadIds.sort()).toEqual(["lead-1", "viejo"]);
+		expect(propias.dpis.sort()).toEqual(
+			[
+				"DPI-BORRADO",
+				"DPI-CODEUDOR",
+				"DPI-ESCRITO-TITULAR",
+				"DPI-HISTORICO",
+				"DPI-LEAD",
+				"DPI-LEGADO",
+			].sort(),
+		);
+	});
+
+	test("sin lead y con varias solicitudes sin dueño: cuenta el DPI de todas, en cualquier orden", () => {
+		const a = fila({ dpi: "DPI-A" });
+		const b = fila({ dpi: "DPI-B" });
+		for (const creditRows of [
+			[a, b],
+			[b, a],
+		]) {
+			const propias = personasPropias({
+				opportunityId: OPP,
+				lead: null,
+				coDebtors: [],
+				creditRows,
+			});
+			expect(propias.dpis.sort()).toEqual(["DPI-A", "DPI-B"]);
+		}
+	});
+
+	test("sin titular ni solicitudes: solo los codeudores; los DPI vacíos no cuentan", () => {
+		expect(
+			personasPropias({
+				opportunityId: OPP,
+				lead: null,
+				coDebtors: [
+					{ ...codeudor("c1", "Carlos"), dpi: "  " },
+					{ ...codeudor("c2", "Dora"), dpi: "DPI-DORA" },
+				],
+				creditRows: [],
+			}),
+		).toEqual({ leadIds: [], dpis: ["DPI-DORA"] });
 	});
 });

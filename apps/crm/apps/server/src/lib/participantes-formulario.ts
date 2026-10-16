@@ -42,7 +42,7 @@ type Titular = Persona & {
 	secondLastName: string | null;
 };
 
-type EntradaParticipantes = {
+export type EntradaParticipantes = {
 	opportunityId: string;
 	lead: Titular | null;
 	coDebtors: (Persona & { fullName: string })[];
@@ -189,4 +189,60 @@ export function armarParticipantes(
 		});
 	}
 	return participantes;
+}
+
+/**
+ * A quiénes nombra la alerta de referencias repetidas, en las dos pantallas.
+ * Como revisa solicitudes, quien dejó una y ya no figura sale como histórico
+ * tenga o no enlace; mismo orden y nombres que las tarjetas.
+ */
+export function participantesDeLaAlerta(
+	entrada: Omit<EntradaParticipantes, "tokens">,
+): Map<string, ParticipanteFormulario> {
+	// Cada solicitud cuenta como el enlace de su dueño.
+	return armarParticipantes({ ...entrada, tokens: entrada.creditRows });
+}
+
+/**
+ * Las personas propias de la oportunidad para la alerta de referencias
+ * repetidas: las mismas que nombra `participantesDeLaAlerta` (titular actual,
+ * codeudores vigentes y quienes dejaron solicitud y ya no figuran), con sus
+ * leads y todos sus DPI tal como están escritos (de lead, de codeudor y el de
+ * su solicitud). Cómo se comparan los DPI lo decide la búsqueda.
+ */
+export function personasPropias(
+	entrada: Pick<EntradaParticipantes, "opportunityId"> & {
+		lead:
+			| (NonNullable<EntradaParticipantes["lead"]> & { dpi: string | null })
+			| null;
+		coDebtors: (EntradaParticipantes["coDebtors"][number] & { dpi: string })[];
+		creditRows: (FilaDeFormulario & { dpi?: string | null })[];
+	},
+): { leadIds: string[]; dpis: string[] } {
+	const leadIds = new Set<string>();
+	const dpis = new Set<string>();
+	const codeudores = new Map(
+		entrada.coDebtors.map((c) => [`coDebtor:${c.id}`, c]),
+	);
+	const participantes = participantesDeLaAlerta({
+		...entrada,
+		financialRows: [],
+	});
+	for (const [clave, participante] of participantes) {
+		if (participante.personType === "lead" && !clave.startsWith("legacy:")) {
+			leadIds.add(participante.personId);
+		}
+		for (const dpi of [
+			clave === `lead:${entrada.lead?.id}` ? entrada.lead?.dpi : null,
+			codeudores.get(clave)?.dpi,
+		]) {
+			if (dpi?.trim()) dpis.add(dpi.trim());
+		}
+	}
+	// El DPI escrito en CADA solicitud: puede haber varias sin dueño en la misma
+	// oportunidad y todas son de personas propias.
+	for (const solicitud of entrada.creditRows) {
+		if (solicitud.dpi?.trim()) dpis.add(solicitud.dpi.trim());
+	}
+	return { leadIds: [...leadIds], dpis: [...dpis] };
 }

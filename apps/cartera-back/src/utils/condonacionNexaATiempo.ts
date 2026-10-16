@@ -448,6 +448,12 @@ export function fechaLimiteBoletaTardia(fechaVencimiento: Date | string): string
   return aYmd(ms);
 }
 
+/** Cuotas con mora para las que la boleta es a tiempo (`fecha_boleta ≤ fechaLimiteBoletaTardia(vencimiento)`), sin mirar el tope. */
+export function cuotasATiempoBoletaTardia<C extends { fecha_vencimiento: Date | string }>(cuotasConMora: readonly C[], fechaBoleta: string): C[] {
+  const boleta = aMs(fechaBoleta);
+  return cuotasConMora.filter((c) => boleta <= aMs(fechaLimiteBoletaTardia(c.fecha_vencimiento)));
+}
+
 const fechaBoletaValida = (fechaBoleta: string, hoy: Date | string): boolean =>
   validarFechaBoleta(fechaBoleta, ymdDeFechaCalendario(hoy)) === null;
 
@@ -477,7 +483,7 @@ export function cuotasQueCalificanBoletaTardia(p: Pick<
   if (!fechaBoletaValida(p.fechaBoleta, p.hoy)) return { calificadas: [], razonSiNinguna: "boleta_invalida" };
   const boleta = aMs(p.fechaBoleta);
   const hoy = aMs(p.hoy);
-  const aTiempo = p.cuotasConMora.filter((c) => boleta <= aMs(fechaLimiteBoletaTardia(c.fecha_vencimiento)));
+  const aTiempo = cuotasATiempoBoletaTardia(p.cuotasConMora, p.fechaBoleta);
   if (aTiempo.length === 0) return { calificadas: [], razonSiNinguna: "fuera_de_ventana" };
   // El tope acota también el MONTO: lo condonado sale de `diasAtraso`, así que debe coincidir con
   // `hoy − vencimiento`; si no (dato inconsistente del llamador) la cuota no califica.

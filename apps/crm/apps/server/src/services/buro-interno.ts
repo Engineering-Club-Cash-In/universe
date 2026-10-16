@@ -1285,9 +1285,7 @@ async function registrarCoincidenciasCarteraSinCola(
 	const usuariosCoincidentes = new Set(fuentesPorUsuario.keys());
 	const objetivosPorUsuario = new Map<number, ObjetivoIdentidad[]>();
 	for (const [usuarioId, fuenteIds] of fuentesPorUsuario) {
-		objetivosPorUsuario.set(
-			usuarioId,
-			fuenteIds.flatMap((fuenteId) => {
+		const objetivosUsuario: ObjetivoIdentidad[] = fuenteIds.flatMap((fuenteId) => {
 				const origen = origenFuente.get(fuenteId);
 				if (!origen) return [];
 				return [{
@@ -1304,7 +1302,33 @@ async function registrarCoincidenciasCarteraSinCola(
 				// Los objetivos ligados a un lead del CRM van primero: así la ficha
 				// nace con su leadId y DPI, y la identidad base de Cartera que
 				// coincide con la misma persona resuelve después a esa ficha.
-				.sort((a, b) => Number(Boolean(b.lead)) - Number(Boolean(a.lead))),
+				.sort((a, b) => Number(Boolean(b.lead)) - Number(Boolean(a.lead)));
+		// Un cliente de una sola identidad es una sola persona: si su lead ya
+		// coincidió, la identidad base no crea otra ficha aunque el nombre esté
+		// escrito distinto; sus candidatos se suman al objetivo del lead.
+		const identidadUnica = !(
+			grupos.get(usuarioId)?.usuario.nombre.includes("/") ?? true
+		);
+		const conLead = objetivosUsuario.filter((objetivo) => objetivo.lead);
+		objetivosPorUsuario.set(
+			usuarioId,
+			identidadUnica && conLead.length > 0
+				? conLead.map((objetivo, indice) =>
+						indice === 0
+							? {
+									...objetivo,
+									candidatos: [
+										...new Set([
+											...objetivo.candidatos,
+											...objetivosUsuario
+												.filter((base) => !base.lead)
+												.flatMap((base) => base.candidatos),
+										]),
+									],
+								}
+							: objetivo,
+					)
+				: objetivosUsuario,
 		);
 	}
 		const fuentesAutomaticas = await tx

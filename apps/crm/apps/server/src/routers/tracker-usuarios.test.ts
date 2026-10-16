@@ -215,8 +215,10 @@ describe("montaje en partnerTrackerRouter", () => {
 		}
 	});
 
-	test("la superficie de tracker-usuarios son getMiPerfil y las dos lecturas", () => {
+	test("la superficie de tracker-usuarios son getMiPerfil, las dos lecturas y crear/editar", () => {
 		expect(Object.keys(trackerUsuariosRouter).sort()).toEqual([
+			"crearUsuarioDeMiAgencia",
+			"editarUsuarioDeMiAgencia",
 			"getMiPerfil",
 			"getUsuarioDeMiAgencia",
 			"getUsuariosDeMiAgencia",

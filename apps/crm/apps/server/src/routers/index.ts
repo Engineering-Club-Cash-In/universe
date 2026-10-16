@@ -560,6 +560,8 @@ export const partnerTrackerRouter = {
 	getMiPerfil: trackerUsuariosRouter.getMiPerfil,
 	getUsuariosDeMiAgencia: trackerUsuariosRouter.getUsuariosDeMiAgencia,
 	getUsuarioDeMiAgencia: trackerUsuariosRouter.getUsuarioDeMiAgencia,
+	crearUsuarioDeMiAgencia: trackerUsuariosRouter.crearUsuarioDeMiAgencia,
+	editarUsuarioDeMiAgencia: trackerUsuariosRouter.editarUsuarioDeMiAgencia,
 };
 
 // Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.

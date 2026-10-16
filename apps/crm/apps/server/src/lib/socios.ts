@@ -166,7 +166,7 @@ export function generarContrasenaTemporal(): string {
 	return out;
 }
 
-const DOMINIO_INTERNO = "@clubcashin.com";
+export const DOMINIO_INTERNO = "@clubcashin.com";
 
 /**
  * Dos altas simultáneas con el mismo correo pasan ambas el chequeo de better-auth
@@ -420,6 +420,46 @@ export async function agregarMembresia(userId: string, membresia: MembresiaInput
 			companyId: membresia.companyId,
 			sellerId: membresia.sellerId,
 		});
+	});
+}
+
+/** Cuenta (de cualquier rol) con ese correo, para decidir si ya existe. */
+export async function buscarCuentaPorCorreo(
+	correo: string,
+): Promise<{ id: string; role: string | null } | null> {
+	const [cuenta] = await db
+		.select({ id: user.id, role: user.role })
+		.from(user)
+		.where(eq(sql`lower(${user.email})`, correo.trim().toLowerCase()))
+		.limit(1);
+	return cuenta ?? null;
+}
+
+/**
+ * Deja al socio como gerente de esa agencia (sellerId NULL) y la reactiva, sin
+ * tocar sus otras agencias. Solo opera sobre socios con membresía ahí.
+ * Reactivar es un efecto de promover, aunque estuviera desactivado ahí: el
+ * llamador debe haberlo avisado y obtenido confirmación antes.
+ */
+export async function promoverMembresiaAGerente(
+	userId: string,
+	companyId: string,
+): Promise<void> {
+	await db.transaction(async (tx) => {
+		await exigirSocio(tx, userId);
+		const filas = await tx
+			.update(partnerMembers)
+			.set({ sellerId: null, desactivadoAt: null, desactivadoPor: null })
+			.where(
+				and(
+					eq(partnerMembers.userId, userId),
+					eq(partnerMembers.companyId, companyId),
+				),
+			)
+			.returning({ id: partnerMembers.id });
+		if (filas.length === 0) {
+			throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+		}
 	});
 }
 

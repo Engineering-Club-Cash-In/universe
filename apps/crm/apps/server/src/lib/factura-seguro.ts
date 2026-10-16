@@ -567,10 +567,17 @@ export function resolverAseguradora(
 
 // Correos de pólizas: fijos, todos van en "Para". Fuera de producción no les
 // llega nada: @cci/email con SERVER=DEV desvía todo a EMAIL_DEV_RECIPIENT.
-export const CORREOS_POLIZAS_GYT: readonly string[] = [
-	"rcordoba@gyt.com.gt",
-	"npixtun@gyt.com.gt",
-];
+// Correos de G&T: vienen de la variable CORREOS_POLIZAS_GYT (separados por
+// coma) para no dejarlos en el repo. Sin la variable la lista queda vacía y el
+// envío a G&T queda en `sin_destinatario`.
+export function correosPolizasGyt(
+	valor: string | undefined = process.env.CORREOS_POLIZAS_GYT,
+): string[] {
+	return (valor ?? "")
+		.split(",")
+		.map((c) => c.trim())
+		.filter(Boolean);
+}
 export const CORREOS_POLIZAS_UNIVERSALES: readonly string[] = [
 	"ccicorredores@universales.com",
 ];
@@ -591,10 +598,13 @@ export const CORREOS_POLIZAS_INTERNOS: readonly string[] = [
 
 export type CorreosPorAseguradora = Record<Aseguradora, readonly string[]>;
 
-const CORREOS_POLIZAS: CorreosPorAseguradora = {
-	gyt: CORREOS_POLIZAS_GYT,
-	universales: CORREOS_POLIZAS_UNIVERSALES,
-};
+// Se llama en cada envío, no al cargar el módulo, para leer la variable al momento.
+function correosPolizas(): CorreosPorAseguradora {
+	return {
+		gyt: correosPolizasGyt(),
+		universales: CORREOS_POLIZAS_UNIVERSALES,
+	};
+}
 
 const correo = z.string().email();
 
@@ -611,7 +621,7 @@ function limpiar(lista: readonly string[]): string[] {
  */
 export function destinatariosDe(
 	aseguradora: Aseguradora,
-	correos: CorreosPorAseguradora = CORREOS_POLIZAS,
+	correos: CorreosPorAseguradora = correosPolizas(),
 	internos: readonly string[] = CORREOS_POLIZAS_INTERNOS,
 ): string[] {
 	const deLaAseguradora = limpiar(correos[aseguradora]);

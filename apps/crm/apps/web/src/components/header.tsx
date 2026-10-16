@@ -187,7 +187,10 @@ export default function Header() {
 											PERMISSIONS.canAccessPorcentajeEfectividadReport(
 												userRole,
 											) ||
-											PERMISSIONS.canAccessMetaColocacionReport(userRole)) && (
+											PERMISSIONS.canAccessMetaColocacionReport(userRole) ||
+											PERMISSIONS.canAccessLeadsPredioAgenciaReport(
+												userRole,
+											)) && (
 											<>
 												<DropdownMenuSeparator />
 												<DropdownMenuItem asChild>
@@ -567,7 +570,8 @@ function MobileNav({
 		!!userRole &&
 		(PERMISSIONS.canAccessTiempoCierreReport(userRole) ||
 			PERMISSIONS.canAccessPorcentajeEfectividadReport(userRole) ||
-			PERMISSIONS.canAccessMetaColocacionReport(userRole));
+			PERMISSIONS.canAccessMetaColocacionReport(userRole) ||
+			PERMISSIONS.canAccessLeadsPredioAgenciaReport(userRole));
 
 	return (
 		<div className="md:hidden">

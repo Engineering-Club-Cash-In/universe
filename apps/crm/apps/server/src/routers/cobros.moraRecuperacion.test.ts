@@ -42,6 +42,7 @@ mock.module("../lib/orpc", () => ({
 	crmProcedure: procedure,
 	efectividadPorEtapaReportProcedure: procedure,
 	juridicoProcedure: procedure,
+	leadsPredioAgenciaReportProcedure: procedure,
 	metaColocacionReportProcedure: procedure,
 	protectedProcedure: procedure,
 	publicProcedure: procedure,

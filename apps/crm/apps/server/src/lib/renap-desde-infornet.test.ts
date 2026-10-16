@@ -1,0 +1,147 @@
+import { describe, expect, test } from "bun:test";
+import type { FichaPrincipalPersona } from "../db/schema/buro";
+import { mapearFichaInfornetARenap } from "./renap-desde-infornet";
+
+const DPI = "3075219820602";
+
+const fichaBase: FichaPrincipalPersona = {
+	codigo: 123,
+	nombres: "MARIA DE LOS ANGELES",
+	apellidos: "PEREZ LOPEZ DE FIGUEROA",
+	sexo: "FEMENINO",
+	fechaNacimiento: "13/08/1999",
+	estadoCivil: "CASADO",
+	lugarNacimiento: "MIXCO, GUATEMALA",
+	pais: "GUATEMALA",
+	nacionalidad: "GUATEMALTECA",
+	profesion: "ESTUDIANTE",
+};
+
+describe("mapearFichaInfornetARenap", () => {
+	test("llena solo los campos de RENAP que Infornet trae", () => {
+		expect(mapearFichaInfornetARenap(DPI, fichaBase)).toEqual({
+			dpi: DPI,
+			firstName: "MARIA DE LOS ANGELES",
+			firstLastName: "PEREZ LOPEZ DE FIGUEROA",
+			gender: "F",
+			civilStatus: "C",
+			birthDate: "1999-08-13",
+			dpiExpiracyDate: null,
+			municipalityBornedIn: "MIXCO",
+			departmentBornedIn: "GUATEMALA",
+			bornedIn: "GUATEMALA",
+			nationality: "GUATEMALTECA",
+			ocupation: "ESTUDIANTE",
+		});
+	});
+
+	test("no inventa campos que Infornet no trae", () => {
+		const persona = mapearFichaInfornetARenap(DPI, fichaBase);
+
+		for (const campo of [
+			"secondName",
+			"thirdName",
+			"secondLastName",
+			"marriedLastName",
+			"picture",
+			"deathDate",
+			"cedulaOrder",
+			"cedulaRegister",
+		]) {
+			expect(persona).not.toHaveProperty(campo);
+		}
+	});
+
+	test("mapea estado civil y vigencia del DPI cuando Infornet los trae", () => {
+		const persona = mapearFichaInfornetARenap(DPI, fichaBase, [
+			{
+				tipo: "DPI",
+				numero: DPI,
+				fechaVencimiento: "01/01/2020",
+			},
+			{
+				tipo: "DPI",
+				numero: "9999999999999",
+				fechaVencimiento: "01/01/2030",
+			},
+			{
+				tipo: "DPI",
+				numero: DPI,
+				fechaVencimiento: "01/01/2025",
+			},
+		]);
+
+		expect(persona?.civilStatus).toBe("C");
+		expect(persona?.dpiExpiracyDate).toBe("2025-01-01");
+		expect(
+			mapearFichaInfornetARenap(DPI, fichaBase, [
+				{
+					tipo: "DPI",
+					numero: "9999999999999",
+					fechaVencimiento: "01/01/2030",
+				},
+			])?.dpiExpiracyDate,
+		).toBeNull();
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, estadoCivil: "SOLTERO" })
+				?.civilStatus,
+		).toBe("S");
+	});
+
+	test("sin nombres o apellidos no hay registro", () => {
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, nombres: "  " }),
+		).toBeNull();
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, apellidos: "" }),
+		).toBeNull();
+	});
+
+	test("MASCULINO es M y un sexo desconocido queda vacío", () => {
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, sexo: "MASCULINO" })
+				?.gender,
+		).toBe("M");
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, sexo: "" })?.gender,
+		).toBeNull();
+	});
+
+	test("acepta también el sexo en una letra", () => {
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, sexo: "M" })?.gender,
+		).toBe("M");
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, sexo: "f" })?.gender,
+		).toBe("F");
+	});
+
+	test("fechas aproximadas, vacías o inválidas quedan vacías", () => {
+		for (const fechaNacimiento of ["APROX 12/1998", "", "31/02/1999"]) {
+			expect(
+				mapearFichaInfornetARenap(DPI, { ...fichaBase, fechaNacimiento })
+					?.birthDate,
+			).toBeNull();
+		}
+	});
+
+	test("un lugar sin coma no se separa, pero el país sí se llena", () => {
+		for (const lugarNacimiento of ["-NA-", "EXTRANJEROS NATURALIZADOS"]) {
+			const persona = mapearFichaInfornetARenap(DPI, {
+				...fichaBase,
+				lugarNacimiento,
+				pais: "COSTA RICA",
+			});
+			expect(persona?.municipalityBornedIn).toBeNull();
+			expect(persona?.departmentBornedIn).toBeNull();
+			expect(persona?.bornedIn).toBe("COSTA RICA");
+		}
+	});
+
+	test("sin profesión la ocupación queda vacía", () => {
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, profesion: undefined })
+				?.ocupation,
+		).toBeNull();
+	});
+});

@@ -29,17 +29,19 @@ describe("DesgloseMoraPanel — el porqué de la mora para el asesor", () => {
     const t = texto(renderToStaticMarkup(<DesgloseMoraPanel desglose={desglose} moraRegistrada={625.18} capital={27909.73} abiertoInicial />));
     expect(t).toContain("Q10.42 por día");
     expect(t).toContain("Q312.59 por cuota");
-    expect(t).toContain("#41 venció 23/08/2026 ⏳ pago sin validar hace más de 7 días: genera mora 38 tope");
+    expect(t).toContain("Cuota #41 venció 23/08/2026 · 38 días (tope) ⏳ pago sin validar hace más de 7 días: genera mora Q312.59");
     // La regla dice la verdad: el pendiente frena la mora solo 7 días.
     expect(t).toContain("El pago les frena la mora hasta 7 días; si pasado ese plazo contabilidad no lo valida, la cuota vuelve a generar mora.");
     expect(t).not.toContain("generan mora hasta que contabilidad valide");
-    expect(t).toContain("−Q20.84");
+    expect(t).toContain("Cuota #42 venció 23/09/2026 · 7 días generó Q72.94 · abonado Q20.84 Q52.10");
+    // Sin abono no se repite «generó»: sería igual a lo que debe.
+    expect(t).not.toContain("generó Q312.59");
     expect(t).toContain("Total calculado hoy Q364.69");
     // Registrada Q625.18 ≠ calculada: el cierre la REEMPLAZA por el cálculo de mañana (baja).
     expect(t).toContain("Si no paga, con el próximo cierre la mora queda en Q375.11 (el cálculo de hoy más Q10.42 de un día más).");
     expect(t).not.toContain("sube al menos");
-    // Condonar no es pagar: la columna es neutral.
-    expect(t).toContain("Abonado");
+    // Condonar no es pagar: el rótulo es neutral.
+    expect(t).toContain("abonado Q20.84");
     expect(t).toContain("pagado o condonado");
     expect(t).not.toContain("ya pagó");
     expect(t).toContain("La mora registrada (Q625.18) es la del cierre de anoche");

@@ -17,7 +17,10 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import type { ExclusionesReferenciaDuplicada } from "./referencia-duplicada";
-import type { ReferenciaComparable } from "./referencia-normalizacion";
+import {
+	normalizarDpiReferencia,
+	type ReferenciaComparable,
+} from "./referencia-normalizacion";
 
 const URL_PRUEBAS = process.env.CRM_TEST_DATABASE_URL ?? "";
 const hostPruebas = URL_PRUEBAS ? new URL(URL_PRUEBAS).hostname : "";
@@ -132,6 +135,7 @@ describe.skipIf(!esLocal)(
 			const [res] = await buscar(
 				[{ dpi: "2345 67899 0101", telefono: "99990000" }],
 				{
+					excluirLeadIds: [yo],
 					excluirOportunidadId: oppYo,
 				},
 			);
@@ -149,8 +153,11 @@ describe.skipIf(!esLocal)(
 		test("coincide por teléfono con referencias_lead de otro lead (formato distinto)", async () => {
 			const otro = await crearLead("OtroCobros");
 			await refLead(otro, "Pedro Cobros", "55551234");
+			const yo = await crearLead("YoCobros");
 
-			const [res] = await buscar([{ telefono: "+502 5555-1234" }], {});
+			const [res] = await buscar([{ telefono: "+502 5555-1234" }], {
+				excluirLeadIds: [yo],
+			});
 			const r = res.find((x: { leadId: string }) => x.leadId === otro);
 			expect(r).toMatchObject({
 				tipo: "cobros",
@@ -193,6 +200,42 @@ describe.skipIf(!esLocal)(
 			const [res] = await buscar([{ dpi: DPI_A, telefono: "33334444" }], {});
 			const r = res.find((x: { leadId: string }) => x.leadId === otro);
 			expect(r?.coincidePor).toBe("telefono");
+		});
+
+		test("mismo lead y misma oportunidad quedan excluidos", async () => {
+			const yo = await crearLead("YoExcluido");
+			const oppYo = await crearOpp(yo);
+			await solicitud(oppYo, [
+				{ nombre: "Propia", relacion: "x", telefono: "44445555", dpi: DPI_C },
+			]);
+			await refLead(yo, "Propia Cobros", "44445555");
+			const sinExcluir = await buscar(
+				[{ dpi: DPI_C, telefono: "44445555" }],
+				{},
+			);
+			expect(
+				sinExcluir[0].filter((x: { leadId: string }) => x.leadId === yo).length,
+			).toBeGreaterThan(0);
+
+			const [res] = await buscar([{ dpi: DPI_C, telefono: "44445555" }], {
+				excluirLeadIds: [yo],
+				excluirOportunidadId: oppYo,
+			});
+			expect(
+				res.filter((x: { leadId: string }) => x.leadId === yo),
+			).toHaveLength(0);
+
+			// Solo excluir la oportunidad (otra opp del mismo lead cuenta como "otro cliente"? no: mismo lead)
+			const [soloOpp] = await buscar([{ dpi: DPI_C, telefono: "44445555" }], {
+				excluirOportunidadId: oppYo,
+			});
+			// la solicitud ya no sale, pero referencias_lead del mismo lead sí (no hay filtro por opp ahí)
+			expect(
+				soloOpp.filter(
+					(x: { leadId: string; tipo: string }) =>
+						x.leadId === yo && x.tipo === "personal",
+				),
+			).toHaveLength(0);
 		});
 
 		test("JSONB con basura no rompe la consulta", async () => {
@@ -319,6 +362,27 @@ describe.skipIf(!esLocal)(
 			const delOtro = res.filter((x: { leadId: string }) => x.leadId === otro);
 			expect(delOtro).toHaveLength(1);
 			expect(delOtro[0].coincidePor).toBe("dpi");
+		});
+
+		test("el mismo lead con OTRA oportunidad no alerta en el lado solicitud", async () => {
+			const yo = await crearLead("YoOtraOpp");
+			const oppUno = await crearOpp(yo);
+			const oppDos = await crearOpp(yo);
+			await solicitud(oppUno, [
+				{
+					nombre: "Propia Otra Opp",
+					relacion: "x",
+					telefono: "52520000",
+					dpi: DPI_C,
+				},
+			]);
+			const [res] = await buscar([{ dpi: DPI_C, telefono: "52520000" }], {
+				excluirLeadIds: [yo],
+				excluirOportunidadId: oppDos,
+			});
+			expect(
+				res.filter((x: { leadId: string }) => x.leadId === yo),
+			).toHaveLength(0);
 		});
 
 		test("limita a 10 coincidencias por referencia", async () => {
@@ -486,7 +550,7 @@ describe.skipIf(!esLocal)(
 					{ telefono: "+502 6969-0002" },
 					{ telefono: "69690003" },
 				],
-				{ excluirOportunidadId: oppYo },
+				{ excluirLeadIds: [yo], excluirOportunidadId: oppYo },
 			);
 			const de = (i: number, lead: string) =>
 				res[i].coincidencias.find((x: { leadId: string }) => x.leadId === lead);
@@ -561,12 +625,116 @@ describe.skipIf(!esLocal)(
 			).toBe(true);
 		});
 
-		test("titular cambiado: su vieja solicitud es suya, no del titular actual", async () => {
+		test("la misma persona con otro lead (mismo DPI) no es «otro cliente», ni en cobros ni en solicitud", async () => {
+			const DPI_PERSONA = "6789012360101";
+			const yo = await crearLead("PersonaA", DPI_PERSONA);
+			const repetido = await crearLead(
+				"PersonaARepetida",
+				`${DPI_PERSONA.slice(0, 4)} ${DPI_PERSONA.slice(4, 9)} ${DPI_PERSONA.slice(9)}`,
+			);
+			const ajeno = await crearLead("Ajeno", DPI_C);
+			await refLead(repetido, "Cobros del repetido", "76760001");
+			await solicitud(await crearOpp(repetido), [
+				{
+					nombre: "Solicitud del repetido",
+					relacion: "x",
+					telefono: "76760001",
+				},
+			]);
+			await refLead(ajeno, "Cobros del ajeno", "76760001");
+
+			const sinExcluir = await buscarCrudo([{ telefono: "76760001" }], {});
+			expect(
+				sinExcluir[0].coincidencias
+					.map((x: { leadId: string }) => x.leadId)
+					.sort(),
+			).toEqual([repetido, ajeno].sort());
+			// por el DPI dado, o por el DPI del lead propio
+			for (const exclusiones of [
+				{ excluirDpis: [DPI_PERSONA] },
+				{ excluirLeadIds: [yo] },
+			]) {
+				const [con] = await buscarCrudo(
+					[{ telefono: "76760001" }],
+					exclusiones,
+				);
+				expect(
+					con.coincidencias.map((x: { leadId: string }) => x.leadId),
+				).toEqual([ajeno]);
+				expect(con.total).toBe(1);
+			}
+		});
+
+		test("un codeudor que fue titular de su propio lead no se marca a sí mismo", async () => {
+			const DPI_CODEUDOR = "6789012360101";
+			const titular = await crearLead("TitularReal", DPI_C);
+			const suPropioLead = await crearLead("CodeudorComoTitular", DPI_CODEUDOR);
+			await solicitud(await crearOpp(suPropioLead), [
+				{ nombre: "Mi vieja referencia", relacion: "x", telefono: "77770001" },
+			]);
+			const [r] = await buscarCrudo([{ telefono: "77770001" }], {
+				excluirLeadIds: [titular],
+				excluirDpis: [DPI_C, DPI_CODEUDOR],
+			});
+			expect(r.coincidencias).toEqual([]);
+			const [sin] = await buscarCrudo([{ telefono: "77770001" }], {
+				excluirLeadIds: [titular],
+			});
+			expect(
+				sin.coincidencias.map((x: { leadId: string }) => x.leadId),
+			).toEqual([suPropioLead]);
+		});
+
+		test("quien fue codeudor en otro crédito y allí dio la misma referencia no se marca a sí mismo", async () => {
+			const DPI_PERSONA = "6789012360101";
+			const otroTitular = await crearLead("TitularDeOtroCredito", DPI_C);
+			const oppOtro = await crearOpp(otroTitular);
+			const suFila = await db.execute(sql`
+				INSERT INTO co_debtors (opportunity_id, full_name, dpi)
+				VALUES (${oppOtro}::uuid, 'Yo Como Codeudora', '6789 01236 0101') RETURNING id::text AS id`);
+			const ajeno = await db.execute(sql`
+				INSERT INTO co_debtors (opportunity_id, full_name, dpi)
+				VALUES (${oppOtro}::uuid, 'Codeudor Ajeno', ${DPI_E}) RETURNING id::text AS id`);
+			const insertar = (tipo: string, id: string, telefono: string) =>
+				db.execute(sql`
+					INSERT INTO credit_applications (opportunity_id, person_type, person_id, referencias_personales)
+					VALUES (${oppOtro}::uuid, ${tipo}, ${id}::uuid, ${JSON.stringify([{ nombre: "Ref", telefono }])}::jsonb)`);
+			await insertar("coDebtor", suFila.rows[0].id, "79790001");
+			await insertar("coDebtor", ajeno.rows[0].id, "79790002");
+			await insertar("lead", otroTitular, "79790003");
+
+			const referencias = [
+				{ telefono: "79790001" },
+				{ telefono: "79790002" },
+				{ telefono: "79790003" },
+			];
+			const quienes = (r: {
+				coincidencias: { dadaPor: { nombre: string } }[];
+			}) => r.coincidencias.map((x) => x.dadaPor.nombre);
+			const sin = await buscarCrudo(referencias, {});
+			expect(sin.map(quienes)).toEqual([
+				["Yo Como Codeudora"],
+				["Codeudor Ajeno"],
+				["TitularDeOtroCredito Prueba"],
+			]);
+			// excluye solo lo que ella misma dio; lo del titular y del otro codeudor sigue
+			const con = await buscarCrudo(referencias, {
+				excluirDpis: [DPI_PERSONA],
+			});
+			expect(con.map(quienes)).toEqual([
+				[],
+				["Codeudor Ajeno"],
+				["TitularDeOtroCredito Prueba"],
+			]);
+		});
+
+		test("titular cambiado: su vieja solicitud es suya, no del titular actual, y no lo alerta a él", async () => {
 			const DPI_VICENTE = "6789012360101";
 			const vicente = await crearLead("Vicente", DPI_VICENTE);
 			const ana = await crearLead("Ana", DPI_C);
 			// la oportunidad era de Vicente; hoy su titular es Ana
 			const oppVieja = await crearOpp(ana);
+			// sin DPI escrito en la solicitud: se lo reconoce por su registro de lead
 			await db.execute(sql`
 				INSERT INTO credit_applications (opportunity_id, person_type, person_id, primer_nombre, referencias_personales)
 				VALUES (${oppVieja}::uuid, 'lead', ${vicente}::uuid, 'Vicente', ${JSON.stringify([{ nombre: "Y", telefono: "80800001" }])}::jsonb)`);
@@ -581,9 +749,17 @@ describe.skipIf(!esLocal)(
 					dadaPor: { nombre: "Vicente Prueba", rol: "titular" },
 				}),
 			]);
+			// Vicente revisado desde su oportunidad nueva: por su lead o por su DPI
+			for (const exclusiones of [
+				{ excluirLeadIds: [vicente] },
+				{ excluirDpis: [DPI_VICENTE] },
+			]) {
+				const [con] = await buscarCrudo(referencia, exclusiones);
+				expect(con.coincidencias).toEqual([]);
+			}
 		});
 
-		test("codeudor borrado: se lo nombra con su solicitud", async () => {
+		test("codeudor borrado: se lo reconoce por el DPI de su solicitud y se nombra con ella", async () => {
 			const DPI_BETO = "6789012360101";
 			const otro = await crearLead("OtroConBorrado", DPI_C);
 			const oppOtro = await crearOpp(otro);
@@ -597,6 +773,198 @@ describe.skipIf(!esLocal)(
 				leadId: otro,
 				dadaPor: { nombre: "Beto Borrado", rol: "codeudor" },
 			});
+			const [con] = await buscarCrudo(referencia, { excluirDpis: [DPI_BETO] });
+			expect(con.coincidencias).toEqual([]);
+		});
+
+		test("lo que dio el codeudor de una oportunidad propia no alerta: el cliente de esa fila es propio", async () => {
+			const yo = await crearLead("YoConCodeudor", DPI_A);
+			const oppRevisada = await crearOpp(yo);
+			const oppOtra = await crearOpp(yo);
+			const co = await db.execute(sql`
+				INSERT INTO co_debtors (opportunity_id, full_name, dpi)
+				VALUES (${oppOtra}::uuid, 'Codeudor De Mi Otra', ${DPI_E}) RETURNING id::text AS id`);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, referencias_personales)
+				VALUES (${oppOtra}::uuid, 'coDebtor', ${co.rows[0].id}::uuid, ${JSON.stringify([{ nombre: "R", telefono: "80800031" }])}::jsonb)`);
+			const referencia = [{ telefono: "80800031" }];
+
+			const [sin] = await buscarCrudo(referencia, {});
+			expect(sin.coincidencias[0]).toMatchObject({
+				leadId: yo,
+				dadaPor: { nombre: "Codeudor De Mi Otra", rol: "codeudor" },
+			});
+			const [con] = await buscarCrudo(referencia, {
+				excluirLeadIds: [yo],
+				excluirOportunidadId: oppRevisada,
+			});
+			expect(con.coincidencias).toEqual([]);
+		});
+
+		test("lo que dio el titular anterior es de él: el titular actual de esa oportunidad sí lo ve", async () => {
+			const ana = await crearLead("AnaActual", DPI_A);
+			const vicente = await crearLead("VicenteAnterior", DPI_B);
+			const oppQueEraDeVicente = await crearOpp(ana);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, referencias_personales)
+				VALUES (${oppQueEraDeVicente}::uuid, 'lead', ${vicente}::uuid, ${JSON.stringify([{ nombre: "S", telefono: "80800032" }])}::jsonb)`);
+			const oppDeAna = await crearOpp(ana);
+
+			const [res] = await buscarCrudo([{ telefono: "80800032" }], {
+				excluirLeadIds: [ana],
+				excluirDpis: [DPI_A],
+				excluirOportunidadId: oppDeAna,
+			});
+			expect(res.coincidencias).toEqual([
+				expect.objectContaining({
+					leadId: vicente,
+					clienteNombre: "VicenteAnterior Prueba",
+					oportunidadId: oppQueEraDeVicente,
+					dadaPor: { nombre: "VicenteAnterior Prueba", rol: "titular" },
+				}),
+			]);
+		});
+
+		test("para excluir basta un DPI de 13 dígitos, aunque su verificador no cuadre", async () => {
+			const DPI_MAL = "1234567890123";
+			expect(normalizarDpiReferencia(DPI_MAL)).toBeNull();
+			const otroRegistro = await crearLead("MismaPersonaDpiMal", DPI_MAL);
+			await refLead(otroRegistro, "Ref", "80800033");
+			const referencia = [{ telefono: "80800033" }];
+			const [sin] = await buscarCrudo(referencia, {});
+			expect(sin.coincidencias).toHaveLength(1);
+			const [con] = await buscarCrudo(referencia, {
+				excluirDpis: ["1234 56789 0123"],
+			});
+			expect(con.coincidencias).toEqual([]);
+			// menos de 13 dígitos no excluye a nadie
+			const [corto] = await buscarCrudo(referencia, { excluirDpis: ["123"] });
+			expect(corto.coincidencias).toHaveLength(1);
+		});
+
+		test("el cliente de lo que dio un codeudor es el titular con toda su identidad: también el DPI escrito en sus solicitudes", async () => {
+			// la misma persona con otro lead sin DPI, que sí escribió su DPI en la solicitud
+			const ana = await crearLead("Ana", DPI_A);
+			const anaDup = await crearLead("AnaDup");
+			const oppDup = await crearOpp(anaDup);
+			// otra oportunidad de la misma persona, con un formulario legado sin dueño
+			const anaDup2 = await crearLead("AnaDup2");
+			const oppLegada = await crearOpp(anaDup2);
+			const solicitudCon = (
+				opp: string,
+				tipo: string | null,
+				id: string | null,
+				dpi: string | null,
+				telefono: string | null,
+			) =>
+				db.execute(sql`
+					INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+					VALUES (${opp}::uuid, ${tipo}, ${id}::uuid, ${dpi}, ${JSON.stringify(telefono ? [{ nombre: "T", telefono }] : [])}::jsonb)`);
+			await solicitudCon(oppDup, "lead", anaDup, DPI_A, null);
+			await solicitudCon(oppLegada, null, null, DPI_A, null);
+			for (const opp of [oppDup, oppLegada]) {
+				const co = await db.execute(sql`
+					INSERT INTO co_debtors (opportunity_id, full_name, dpi)
+					VALUES (${opp}::uuid, 'Vera', ${DPI_C}) RETURNING id::text AS id`);
+				await solicitudCon(opp, "coDebtor", co.rows[0].id, DPI_C, "80800041");
+			}
+			const referencia = [{ telefono: "80800041" }];
+
+			const [sin] = await buscarCrudo(referencia, {});
+			expect(
+				sin.coincidencias.map((x: { leadId: string }) => x.leadId).sort(),
+			).toEqual([anaDup, anaDup2].sort());
+			const [con] = await buscarCrudo(referencia, {
+				excluirLeadIds: [ana],
+				excluirDpis: [DPI_A],
+			});
+			expect(con.coincidencias).toEqual([]);
+		});
+
+		test("la identidad de un lead es una sola en toda la base: el DPI que escribió en cualquier solicitud suya cuenta en cobros y en otras oportunidades", async () => {
+			const ana = await crearLead("Ana", DPI_A);
+			// Ana otra vez, en un lead sin DPI: solo lo escribió en su solicitud de oppB
+			const anaDup = await crearLead("AnaDup");
+			const oppB = await crearOpp(anaDup);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+				VALUES (${oppB}::uuid, 'lead', ${anaDup}::uuid, ${DPI_A}, '[]'::jsonb)`);
+			// su referencia de cobros, y lo que dio su codeudor en oppD, donde ella no llenó nada
+			await refLead(anaDup, "Ref cobros", "80800051");
+			const oppD = await crearOpp(anaDup);
+			const walter = await db.execute(sql`
+				INSERT INTO co_debtors (opportunity_id, full_name, dpi)
+				VALUES (${oppD}::uuid, 'Walter', ${DPI_E}) RETURNING id::text AS id`);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+				VALUES (${oppD}::uuid, 'coDebtor', ${walter.rows[0].id}::uuid, ${DPI_E}, ${JSON.stringify([{ nombre: "W", telefono: "80800052" }])}::jsonb)`);
+			// y Ana, en su propia oportunidad, da las dos referencias
+			const oppAna = await crearOpp(ana);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+				VALUES (${oppAna}::uuid, 'lead', ${ana}::uuid, ${DPI_A}, ${JSON.stringify(
+					[
+						{ nombre: "P", telefono: "80800051" },
+						{ nombre: "Q", telefono: "80800052" },
+					],
+				)}::jsonb)`);
+			const referencias = [{ telefono: "80800051" }, { telefono: "80800052" }];
+
+			const sin = await buscarCrudo(referencias, {});
+			expect(sin.map((r: { total: number }) => r.total)).toEqual([2, 2]);
+			// revisada Ana: ni la cobros ni lo del codeudor de su lead duplicado
+			const desdeAna = await buscarCrudo(referencias, {
+				excluirOportunidadId: oppAna,
+				excluirLeadIds: [ana],
+				excluirDpis: [DPI_A],
+			});
+			expect(desdeAna.map((r: { total: number }) => r.total)).toEqual([0, 0]);
+			// revisada oppD (titular AnaDup, sin DPI escrito ahí): tampoco lo de Ana
+			const desdeDup = await buscarCrudo(referencias, {
+				excluirOportunidadId: oppD,
+				excluirLeadIds: [anaDup],
+				excluirDpis: [DPI_E],
+			});
+			expect(desdeDup.map((r: { total: number }) => r.total)).toEqual([0, 0]);
+		});
+
+		test("sin lead, el titular de una oportunidad es quien llenó sus solicitudes legadas", async () => {
+			const oppSinLead = await crearOpp(null);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, dpi, referencias_personales)
+				VALUES (${oppSinLead}::uuid, ${DPI_B}, '[]'::jsonb)`);
+			const co = await db.execute(sql`
+				INSERT INTO co_debtors (opportunity_id, full_name, dpi)
+				VALUES (${oppSinLead}::uuid, 'Codeudor Sin Lead', ${DPI_E}) RETURNING id::text AS id`);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, referencias_personales)
+				VALUES (${oppSinLead}::uuid, 'coDebtor', ${co.rows[0].id}::uuid, ${JSON.stringify([{ nombre: "R", telefono: "80800053" }])}::jsonb)`);
+			const referencia = [{ telefono: "80800053" }];
+			const [sin] = await buscarCrudo(referencia, {});
+			expect(sin.coincidencias).toHaveLength(1);
+			// quien revisa es esa misma persona (por el DPI de la legada): el cliente es propio
+			const [con] = await buscarCrudo(referencia, { excluirDpis: [DPI_B] });
+			expect(con.coincidencias).toEqual([]);
+		});
+
+		test("las legadas cuentan solo para el titular actual, no para un titular anterior", async () => {
+			const actual = await crearLead("TitularActual");
+			const anterior = await crearLead("TitularAnterior");
+			const opp = await crearOpp(actual);
+			// legada con el DPI de un tercero; el anterior dejó su solicitud con una referencia
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, dpi, referencias_personales)
+				VALUES (${opp}::uuid, ${DPI_B}, '[]'::jsonb)`);
+			await db.execute(sql`
+				INSERT INTO credit_applications (opportunity_id, person_type, person_id, referencias_personales)
+				VALUES (${opp}::uuid, 'lead', ${anterior}::uuid, ${JSON.stringify([{ nombre: "R", telefono: "80800054" }])}::jsonb)`);
+			// el tercero revisa: la del anterior no es suya y sí lo alerta
+			const [res] = await buscarCrudo([{ telefono: "80800054" }], {
+				excluirDpis: [DPI_B],
+			});
+			expect(
+				res.coincidencias.map((x: { leadId: string }) => x.leadId),
+			).toEqual([anterior]);
 		});
 
 		test("una solicitud de una oportunidad sin lead también cuenta, y la oportunidad que se revisa se excluye", async () => {
@@ -604,7 +972,10 @@ describe.skipIf(!esLocal)(
 			await solicitud(oppSinLead, [
 				{ nombre: "Sin Lead", relacion: "x", telefono: "78780001" },
 			]);
-			const [con] = await buscarCrudo([{ telefono: "78780001" }], {});
+			const yo = await crearLead("YoSinLead");
+			const [con] = await buscarCrudo([{ telefono: "78780001" }], {
+				excluirLeadIds: [yo],
+			});
 			expect(con.coincidencias).toHaveLength(1);
 			expect(con.coincidencias[0]).toMatchObject({
 				leadId: null,
@@ -613,6 +984,7 @@ describe.skipIf(!esLocal)(
 				referenciaNombre: "Sin Lead",
 			});
 			const [sin] = await buscarCrudo([{ telefono: "78780001" }], {
+				excluirLeadIds: [yo],
 				excluirOportunidadId: oppSinLead,
 			});
 			expect(sin.coincidencias).toEqual([]);

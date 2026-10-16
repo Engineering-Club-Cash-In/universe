@@ -269,36 +269,88 @@ export function consolidarCreditosRelacionados(params: {
 		.slice(0, LIMITE_CREDITOS_RELACIONADOS);
 }
 
+/** Lo que de verdad es cada crédito: de quién es y qué vehículo financia. */
+export type CreditoCanonico = {
+	opportunityId: string;
+	/** won/migrate cuenta como crédito; otro estado no se muestra. */
+	status: string | null;
+	/** Titular: el lead de la oportunidad; si no tiene, el del cliente del contrato. */
+	leadId: string | null;
+	/** El del contrato manda; sin contrato, el de la oportunidad. */
+	vehicleId: string | null;
+};
+
+type CasoParaCanonico = {
+	numeroCreditoSifco: string | null;
+	activo: boolean | null;
+	updatedAt: Date | null;
+	/** Del contrato del caso (vía `clients`); null sin contrato. */
+	contratoOpportunityId: string | null;
+	contratoLeadId: string | null;
+	contratoVehicleId: string | null;
+	tieneContrato: boolean;
+};
+
+type OportunidadParaCanonico = {
+	id: string;
+	sifco: string | null;
+	status: string | null;
+	leadId: string | null;
+	vehicleId: string | null;
+};
+
 /**
- * Elige la oportunidad canónica de cada SIFCO (ver `oportunidadesCanonicas`
- * en el servicio): la del contrato del caso VIGENTE (el activo y, a igualdad,
- * el más reciente, como `caso-vigente.ts`); si ese caso no tiene contrato, la
- * primera de `oportunidades`, que ya viene ordenada won/migrate y más
- * reciente primero. Un caso inactivo más nuevo no impone su contrato.
+ * Resuelve cada SIFCO con las mismas reglas que la ficha, en un solo lugar:
+ *
+ * - Caso vigente del SIFCO (`caso-vigente.ts`): el activo y, a igualdad, el
+ *   más reciente. Un caso inactivo no impone su contrato.
+ * - Oportunidad (`resolverContextoCaso`): la del cliente del contrato de ese
+ *   caso; sin contrato, la won/migrate más reciente del SIFCO (las
+ *   `oportunidades` llegan ya en ese orden).
+ * - Titular: el lead de la oportunidad o, con contrato, el del cliente.
+ * - Vehículo (`cargarSeguro`): el del contrato; sin contrato, el de la
+ *   oportunidad.
+ *
+ * Un SIFCO repetido en oportunidades viejas de otro lead queda resuelto a la
+ * vigente: una coincidencia con la fila obsoleta no expone el crédito.
  */
-export function elegirOportunidadesCanonicas(params: {
-	casos: {
-		numeroCreditoSifco: string | null;
-		activo: boolean | null;
-		updatedAt: Date | null;
-		/** De `clients` vía el contrato del caso; null sin contrato. */
-		opportunityId: string | null;
-	}[];
-	oportunidades: { sifco: string | null; id: string }[];
-}): Map<string, string> {
-	const vigentes = new Map<string, (typeof params.casos)[number]>();
+export function resolverCreditosCanonicos(params: {
+	casos: CasoParaCanonico[];
+	oportunidades: OportunidadParaCanonico[];
+}): Map<string, CreditoCanonico> {
+	const vigentes = new Map<string, CasoParaCanonico>();
 	for (const caso of params.casos) {
 		const sifco = caso.numeroCreditoSifco;
 		if (sifco && ganaComoCasoVigente(caso, vigentes.get(sifco))) {
 			vigentes.set(sifco, caso);
 		}
 	}
-	const canonicas = new Map<string, string>();
-	for (const [sifco, caso] of vigentes) {
-		if (caso.opportunityId) canonicas.set(sifco, caso.opportunityId);
-	}
+	const porId = new Map(params.oportunidades.map((o) => [o.id, o]));
+	const primeraPorSifco = new Map<string, OportunidadParaCanonico>();
 	for (const o of params.oportunidades) {
-		if (o.sifco && !canonicas.has(o.sifco)) canonicas.set(o.sifco, o.id);
+		if (o.sifco && !primeraPorSifco.has(o.sifco))
+			primeraPorSifco.set(o.sifco, o);
 	}
-	return canonicas;
+
+	const sifcos = new Set([...vigentes.keys(), ...primeraPorSifco.keys()]);
+	const creditos = new Map<string, CreditoCanonico>();
+	for (const sifco of sifcos) {
+		const caso = vigentes.get(sifco);
+		const delContrato = caso?.contratoOpportunityId
+			? porId.get(caso.contratoOpportunityId)
+			: undefined;
+		const opp = delContrato ?? primeraPorSifco.get(sifco);
+		if (!opp) continue;
+		creditos.set(sifco, {
+			opportunityId: opp.id,
+			status: opp.status,
+			leadId: delContrato
+				? (opp.leadId ?? caso?.contratoLeadId ?? null)
+				: opp.leadId,
+			vehicleId: caso?.tieneContrato
+				? (caso.contratoVehicleId ?? opp.vehicleId)
+				: opp.vehicleId,
+		});
+	}
+	return creditos;
 }

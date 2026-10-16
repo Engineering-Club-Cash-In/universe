@@ -32,11 +32,12 @@ import {
 import { ESTADOS_CON_CREDITO } from "../lib/bot-cobros/buscar-cliente";
 import {
 	armarSemillas,
+	type CreditoCanonico,
 	type CreditoRelacionadoBase,
 	consolidarCreditosRelacionados,
-	elegirOportunidadesCanonicas,
 	type FilaPersonaEnCredito,
 	limpiarNombre,
+	resolverCreditosCanonicos,
 	type Semillas,
 } from "../lib/creditos-relacionados";
 import { cargarCodeudores } from "../lib/ficha-complementos";
@@ -189,50 +190,127 @@ function porTelefono(columna: unknown, telefonos: string[]) {
 	);
 }
 
+type CreditoResuelto = CreditoCanonico & {
+	titularNombre: string;
+	vehiculo: FilaPersonaEnCredito["vehiculo"];
+};
+
 /**
- * SIFCO → id de su oportunidad canónica, con la misma regla que
- * `resolverContextoCaso` aplicada al caso vigente del SIFCO: la del contrato
- * vinculado a ese caso si lo hay; si no, la won/migrate más reciente. Un SIFCO puede repetirse en oportunidades
- * viejas de otro lead, y una coincidencia en esa fila obsoleta no puede
- * exponer el crédito de quien realmente lo tiene.
- *
- * Dos consultas por lote y solo para los candidatos: como subconsulta
- * correlacionada costaba ~0.4 s por búsqueda (no hay índice por SIFCO).
+ * Lo que de verdad es cada SIFCO (ver `resolverCreditosCanonicos`), más el
+ * nombre del titular y el vehículo para mostrar. Todo por lote y solo para
+ * los candidatos: no hay índice por SIFCO y una subconsulta correlacionada
+ * costaba ~0.4 s por búsqueda.
  */
-export async function oportunidadesCanonicas(
+export async function resolverCreditos(
 	sifcos: string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, CreditoResuelto>> {
 	const unicos = [...new Set(sifcos.filter(Boolean))];
 	if (unicos.length === 0) return new Map();
-	const [casos, porSifco] = await Promise.all([
-		// Todos los casos del SIFCO (con o sin contrato): primero se elige el
-		// caso vigente y recién después se mira su contrato.
-		db
-			.select({
-				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-				activo: casosCobros.activo,
-				updatedAt: casosCobros.updatedAt,
-				opportunityId: clients.opportunityId,
-			})
-			.from(casosCobros)
-			.leftJoin(
-				contratosFinanciamiento,
-				eq(contratosFinanciamiento.id, casosCobros.contratoId),
-			)
-			.leftJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
-			.where(inArray(casosCobros.numeroCreditoSifco, unicos)),
-		db
-			.select({ sifco: opportunities.numeroSifco, id: opportunities.id })
-			.from(opportunities)
-			.where(inArray(opportunities.numeroSifco, unicos))
-			.orderBy(
-				sql`CASE WHEN ${opportunities.status} IN ('won', 'migrate') THEN 0 ELSE 1 END`,
-				desc(opportunities.createdAt),
-			),
+
+	// Todos los casos del SIFCO, con o sin contrato: primero se elige el
+	// vigente y recién después se mira su contrato.
+	const casos = await db
+		.select({
+			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			activo: casosCobros.activo,
+			updatedAt: casosCobros.updatedAt,
+			contratoId: casosCobros.contratoId,
+			contratoOpportunityId: clients.opportunityId,
+			contratoLeadId: clients.leadId,
+			contratoVehicleId: contratosFinanciamiento.vehicleId,
+		})
+		.from(casosCobros)
+		.leftJoin(
+			contratosFinanciamiento,
+			eq(contratosFinanciamiento.id, casosCobros.contratoId),
+		)
+		.leftJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+		.where(inArray(casosCobros.numeroCreditoSifco, unicos));
+
+	const oppsDeContratos = casos
+		.map((c) => c.contratoOpportunityId)
+		.filter((id): id is string => Boolean(id));
+	const oportunidades = await db
+		.select({
+			id: opportunities.id,
+			sifco: opportunities.numeroSifco,
+			status: opportunities.status,
+			leadId: opportunities.leadId,
+			vehicleId: opportunities.vehicleId,
+		})
+		.from(opportunities)
+		.where(
+			oppsDeContratos.length > 0
+				? or(
+						inArray(opportunities.numeroSifco, unicos),
+						inArray(opportunities.id, oppsDeContratos),
+					)
+				: inArray(opportunities.numeroSifco, unicos),
+		)
+		// El orden que `resolverCreditosCanonicos` espera para el caso sin
+		// contrato: won/migrate primero, la más reciente.
+		.orderBy(
+			sql`CASE WHEN ${opportunities.status} IN ('won', 'migrate') THEN 0 ELSE 1 END`,
+			desc(opportunities.createdAt),
+		);
+
+	const canonicos = resolverCreditosCanonicos({
+		casos: casos.map((c) => ({ ...c, tieneContrato: Boolean(c.contratoId) })),
+		oportunidades,
+	});
+
+	const leadIds = [...canonicos.values()]
+		.map((c) => c.leadId)
+		.filter((id): id is string => Boolean(id));
+	const vehicleIds = [...canonicos.values()]
+		.map((c) => c.vehicleId)
+		.filter((id): id is string => Boolean(id));
+	const [titulares, vehiculos] = await Promise.all([
+		leadIds.length > 0
+			? db
+					.select({ id: leads.id, nombre: nombreLeadSql })
+					.from(leads)
+					.where(inArray(leads.id, [...new Set(leadIds)]))
+			: Promise.resolve([]),
+		vehicleIds.length > 0
+			? db
+					.select({
+						id: vehicles.id,
+						marca: vehicles.make,
+						modelo: vehicles.model,
+						anio: vehicles.year,
+						placa: vehicles.licensePlate,
+					})
+					.from(vehicles)
+					.where(inArray(vehicles.id, [...new Set(vehicleIds)]))
+			: Promise.resolve([]),
 	]);
-	return elegirOportunidadesCanonicas({ casos, oportunidades: porSifco });
+	const nombrePorLead = new Map(
+		titulares.map((t) => [t.id, limpiarNombre(String(t.nombre ?? ""))]),
+	);
+	const vehiculoPorId = new Map(vehiculos.map((v) => [v.id, v]));
+
+	const resueltos = new Map<string, CreditoResuelto>();
+	for (const [sifco, c] of canonicos) {
+		const v = c.vehicleId ? vehiculoPorId.get(c.vehicleId) : undefined;
+		resueltos.set(sifco, {
+			...c,
+			titularNombre: (c.leadId && nombrePorLead.get(c.leadId)) || "",
+			vehiculo:
+				v?.marca && v.modelo
+					? { marca: v.marca, modelo: v.modelo, anio: v.anio, placa: v.placa }
+					: null,
+		});
+	}
+	return resueltos;
 }
 
+/**
+ * Busca PERSONAS que coinciden (leads y codeudores) y después los créditos
+ * de los que de verdad son titular o codeudor, resueltos con
+ * `resolverCreditos`. Así una fila vieja (otra oportunidad con el mismo
+ * SIFCO, un vehículo o un lead que ya no son los del contrato) no decide nada.
+ */
 async function buscarFilas(
 	semillas: Semillas,
 ): Promise<FilaPersonaEnCredito[]> {
@@ -240,46 +318,39 @@ async function buscarFilas(
 	const nombres = semillas.nombres.map((s) => s.nombre);
 	if (telefonos.length === 0 && nombres.length === 0) return [];
 
-	const base = and(
-		inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
-		isNotNull(opportunities.numeroSifco),
-	);
-	const columnasCredito = {
-		numeroSifco: opportunities.numeroSifco,
-		opportunityId: opportunities.id,
-		titularNombre: nombreLeadSql,
-		marca: vehicles.make,
-		modelo: vehicles.model,
-		anio: vehicles.year,
-		placa: vehicles.licensePlate,
-	};
-
-	const [titulares, codeudores] = await Promise.all([
+	const [personasLead, codeudores] = await Promise.all([
 		db
-			.selectDistinct({
-				...columnasCredito,
-				personaTelefono: leads.phone,
+			.select({
+				id: leads.id,
+				nombre: nombreLeadSql,
+				phone: leads.phone,
 				porTelefono: porTelefono(leads.phone, telefonos),
 			})
-			.from(opportunities)
-			.innerJoin(leads, eq(leads.id, opportunities.leadId))
-			.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
+			.from(leads)
 			.where(
 				and(
-					base,
 					or(
 						filtroTelefonos(leads.phone, telefonos),
 						filtroNombres(nombreLeadSql, nombres),
 					),
+					// Solo personas con algún crédito, para que los homónimos sin
+					// crédito no ocupen el tope. `IN (… UNION …)` y no dos EXISTS:
+					// así Postgres arma el conjunto una vez (~30 ms contra ~180 ms).
+					sql`${leads.id} IN (
+						SELECT lead_id FROM opportunities WHERE numero_sifco IS NOT NULL
+						UNION
+						SELECT lead_id FROM clients
+					)`,
 				),
 			)
 			.orderBy(sql`por_telefono DESC`)
 			.limit(LIMITE_FILAS),
 		db
 			.selectDistinct({
-				...columnasCredito,
-				personaNombre: coDebtors.fullName,
-				personaTelefono: telefonosCodeudorSql,
+				opportunityId: coDebtors.opportunityId,
+				sifco: opportunities.numeroSifco,
+				nombre: coDebtors.fullName,
+				telefonos: telefonosCodeudorSql,
 				porTelefono: porTelefono(telefonosCodeudorSql, telefonos),
 			})
 			.from(coDebtors)
@@ -289,16 +360,14 @@ async function buscarFilas(
 			.leftJoin(
 				creditApplications,
 				and(
-					eq(creditApplications.opportunityId, opportunities.id),
+					eq(creditApplications.opportunityId, coDebtors.opportunityId),
 					eq(creditApplications.personType, "coDebtor"),
 					eq(creditApplications.personId, coDebtors.id),
 				),
 			)
-			.leftJoin(leads, eq(leads.id, opportunities.leadId))
-			.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 			.where(
 				and(
-					base,
+					isNotNull(opportunities.numeroSifco),
 					or(
 						filtroTelefonos(telefonosCodeudorSql, telefonos),
 						filtroNombres(sql`${coDebtors.fullName}`, nombres),
@@ -309,43 +378,73 @@ async function buscarFilas(
 			.limit(LIMITE_FILAS),
 	]);
 
-	const vehiculo = (f: {
-		marca: string | null;
-		modelo: string | null;
-		anio: number | null;
-		placa: string | null;
-	}) =>
-		f.marca && f.modelo
-			? { marca: f.marca, modelo: f.modelo, anio: f.anio, placa: f.placa }
-			: null;
+	// SIFCOs donde esos leads pueden ser titulares: por su oportunidad o por el
+	// cliente de un contrato. Cuál es el titular real lo decide `resolverCreditos`.
+	const idsLead = personasLead.map((p) => p.id);
+	const [porOportunidad, porContrato] =
+		idsLead.length > 0
+			? await Promise.all([
+					db
+						.select({ sifco: opportunities.numeroSifco })
+						.from(opportunities)
+						.where(
+							and(
+								inArray(opportunities.leadId, idsLead),
+								isNotNull(opportunities.numeroSifco),
+							),
+						),
+					db
+						.select({ sifco: casosCobros.numeroCreditoSifco })
+						.from(casosCobros)
+						.innerJoin(
+							contratosFinanciamiento,
+							eq(contratosFinanciamiento.id, casosCobros.contratoId),
+						)
+						.innerJoin(
+							clients,
+							eq(clients.id, contratosFinanciamiento.clientId),
+						)
+						.where(inArray(clients.leadId, idsLead)),
+				])
+			: [[], []];
 
-	// Solo filas de la oportunidad canónica de cada SIFCO.
-	const canonicas = await oportunidadesCanonicas(
-		[...titulares, ...codeudores].map((f) => f.numeroSifco ?? ""),
-	);
-	const esCanonica = (f: {
-		numeroSifco: string | null;
-		opportunityId: string;
-	}) => canonicas.get(f.numeroSifco ?? "") === f.opportunityId;
+	const creditos = await resolverCreditos([
+		...porOportunidad.map((f) => f.sifco ?? ""),
+		...porContrato.map((f) => f.sifco ?? ""),
+		...codeudores.map((f) => f.sifco ?? ""),
+	]);
+	const vigente = (c: CreditoResuelto | undefined): c is CreditoResuelto =>
+		Boolean(c && ESTADOS_CON_CREDITO.some((e) => e === c.status));
 
-	return [
-		...titulares.filter(esCanonica).map((f) => ({
-			numeroSifco: f.numeroSifco ?? "",
-			rol: "titular" as const,
-			personaNombre: limpiarNombre(String(f.titularNombre ?? "")),
-			personaTelefono: f.personaTelefono,
-			titularNombre: limpiarNombre(String(f.titularNombre ?? "")),
-			vehiculo: vehiculo(f),
-		})),
-		...codeudores.filter(esCanonica).map((f) => ({
-			numeroSifco: f.numeroSifco ?? "",
-			rol: "codeudor" as const,
-			personaNombre: limpiarNombre(f.personaNombre),
-			personaTelefono: f.personaTelefono,
-			titularNombre: limpiarNombre(String(f.titularNombre ?? "")),
-			vehiculo: vehiculo(f),
-		})),
-	];
+	const personaPorLead = new Map(personasLead.map((p) => [p.id, p]));
+	const filas: FilaPersonaEnCredito[] = [];
+	for (const [sifco, c] of creditos) {
+		if (!vigente(c) || !c.leadId) continue;
+		const persona = personaPorLead.get(c.leadId);
+		if (!persona) continue;
+		filas.push({
+			numeroSifco: sifco,
+			rol: "titular",
+			personaNombre: limpiarNombre(String(persona.nombre ?? "")),
+			personaTelefono: persona.phone,
+			titularNombre: c.titularNombre,
+			vehiculo: c.vehiculo,
+		});
+	}
+	for (const cd of codeudores) {
+		const c = creditos.get(cd.sifco ?? "");
+		// Solo si es codeudor de la oportunidad vigente del SIFCO.
+		if (!vigente(c) || c.opportunityId !== cd.opportunityId) continue;
+		filas.push({
+			numeroSifco: cd.sifco ?? "",
+			rol: "codeudor",
+			personaNombre: limpiarNombre(cd.nombre),
+			personaTelefono: cd.telefonos,
+			titularNombre: c.titularNombre,
+			vehiculo: c.vehiculo,
+		});
+	}
+	return filas;
 }
 
 /** Créditos relacionados al caso, sin datos de cartera. */
@@ -419,12 +518,18 @@ export async function buscarCreditosRelacionados(params: {
 		new Set<string>() as Set<string> | null,
 	);
 
-	return base.map((c) => ({
-		...c,
-		puedeAbrir: permitidos === null || permitidos.has(c.numeroSifco),
-		asesorNombre: duenos.get(c.numeroSifco)?.nombre ?? null,
-		estado: estados.get(c.numeroSifco) ?? null,
-	}));
+	return (
+		base
+			.map((c) => ({
+				...c,
+				puedeAbrir: permitidos === null || permitidos.has(c.numeroSifco),
+				asesorNombre: duenos.get(c.numeroSifco)?.nombre ?? null,
+				estado: estados.get(c.numeroSifco) ?? null,
+			}))
+			// Un nombre igual puede ser un homónimo: no alcanza para mostrarle a
+			// alguien un crédito que no puede abrir. Solo pasa si ya tiene acceso.
+			.filter((c) => !c.soloPorNombre || c.puedeAbrir)
+	);
 }
 
 export type ResumenCreditoRelacionado = {
@@ -469,7 +574,9 @@ export async function resumenCreditoRelacionado(params: {
 	const base = (await buscarCreditosRelacionadosBase(params.ctx)).find(
 		(c) => c.numeroSifco === sifco,
 	);
-	if (!base) return null;
+	// El resumen exige un vínculo por teléfono: un nombre igual puede ser un
+	// homónimo y no autoriza a ver el crédito de otra persona.
+	if (!base || base.soloPorNombre) return null;
 
 	const [duenos, estados, resumen] = await Promise.all([
 		tolerar(

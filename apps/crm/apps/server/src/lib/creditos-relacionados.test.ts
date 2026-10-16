@@ -2,9 +2,9 @@ import { describe, expect, it } from "bun:test";
 import {
 	armarSemillas,
 	consolidarCreditosRelacionados,
-	elegirOportunidadesCanonicas,
 	type FilaPersonaEnCredito,
 	normalizarNombre,
+	resolverCreditosCanonicos,
 } from "./creditos-relacionados";
 
 const semillas = armarSemillas({
@@ -220,63 +220,111 @@ describe("consolidarCreditosRelacionados", () => {
 	});
 });
 
-describe("elegirOportunidadesCanonicas", () => {
+describe("resolverCreditosCanonicos", () => {
 	const viejo = new Date("2026-01-01");
 	const nuevo = new Date("2026-06-01");
+	const caso = (
+		p: Partial<
+			Parameters<typeof resolverCreditosCanonicos>[0]["casos"][number]
+		>,
+	) => ({
+		numeroCreditoSifco: "1",
+		activo: true,
+		updatedAt: viejo,
+		contratoOpportunityId: null,
+		contratoLeadId: null,
+		contratoVehicleId: null,
+		tieneContrato: false,
+		...p,
+	});
+	const opp = (
+		p: Partial<
+			Parameters<typeof resolverCreditosCanonicos>[0]["oportunidades"][number]
+		>,
+	) => ({
+		id: "opp",
+		sifco: "1",
+		status: "won",
+		leadId: "lead-opp",
+		vehicleId: "veh-opp",
+		...p,
+	});
 
 	it("el contrato del caso activo le gana a un caso inactivo más nuevo", () => {
-		const r = elegirOportunidadesCanonicas({
+		const r = resolverCreditosCanonicos({
 			casos: [
-				{
-					numeroCreditoSifco: "1",
+				caso({
 					activo: false,
 					updatedAt: nuevo,
-					opportunityId: "opp-obsoleta",
-				},
-				{
-					numeroCreditoSifco: "1",
-					activo: true,
-					updatedAt: viejo,
-					opportunityId: "opp-vigente",
-				},
+					contratoOpportunityId: "opp-obsoleta",
+					tieneContrato: true,
+				}),
+				caso({ contratoOpportunityId: "opp-vigente", tieneContrato: true }),
 			],
-			oportunidades: [{ sifco: "1", id: "opp-reciente" }],
+			oportunidades: [
+				opp({ id: "opp-reciente" }),
+				opp({ id: "opp-obsoleta" }),
+				opp({ id: "opp-vigente" }),
+			],
 		});
-		expect(r.get("1")).toBe("opp-vigente");
+		expect(r.get("1")?.opportunityId).toBe("opp-vigente");
 	});
 
 	it("si el caso vigente no tiene contrato no se usa el de un caso inactivo", () => {
-		const r = elegirOportunidadesCanonicas({
+		const r = resolverCreditosCanonicos({
 			casos: [
-				{
-					numeroCreditoSifco: "1",
+				caso({
 					activo: false,
 					updatedAt: nuevo,
-					opportunityId: "opp-obsoleta",
-				},
-				{
-					numeroCreditoSifco: "1",
-					activo: true,
-					updatedAt: viejo,
-					opportunityId: null,
-				},
+					contratoOpportunityId: "opp-obsoleta",
+					tieneContrato: true,
+				}),
+				caso({}),
 			],
 			oportunidades: [
-				{ sifco: "1", id: "opp-ganada-reciente" },
-				{ sifco: "1", id: "opp-otra" },
+				opp({ id: "opp-ganada-reciente" }),
+				opp({ id: "opp-obsoleta" }),
 			],
 		});
-		expect(r.get("1")).toBe("opp-ganada-reciente");
+		expect(r.get("1")?.opportunityId).toBe("opp-ganada-reciente");
 	});
 
 	it("sin caso, la primera oportunidad del orden", () => {
-		const r = elegirOportunidadesCanonicas({
+		const r = resolverCreditosCanonicos({
 			casos: [],
 			oportunidades: [
-				{ sifco: "2", id: "a" },
-				{ sifco: "2", id: "b" },
+				opp({ id: "a", sifco: "2" }),
+				opp({ id: "b", sifco: "2" }),
 			],
 		});
-		expect(r.get("2")).toBe("a");
+		expect(r.get("2")?.opportunityId).toBe("a");
+	});
+
+	it("con contrato, el titular cae al lead del cliente si la oportunidad no tiene", () => {
+		const r = resolverCreditosCanonicos({
+			casos: [
+				caso({
+					contratoOpportunityId: "opp-c",
+					contratoLeadId: "lead-cliente",
+					tieneContrato: true,
+				}),
+			],
+			oportunidades: [opp({ id: "opp-c", leadId: null })],
+		});
+		expect(r.get("1")?.leadId).toBe("lead-cliente");
+	});
+
+	it("el vehículo del contrato le gana al de la oportunidad", () => {
+		const r = resolverCreditosCanonicos({
+			casos: [
+				caso({
+					contratoOpportunityId: "opp-c",
+					contratoVehicleId: "veh-contrato",
+					tieneContrato: true,
+				}),
+			],
+			oportunidades: [opp({ id: "opp-c", vehicleId: "veh-opp" })],
+		});
+		expect(r.get("1")?.vehicleId).toBe("veh-contrato");
 	});
 });

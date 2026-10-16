@@ -5757,12 +5757,33 @@ export const cobrosRouter = {
 
 						// Mora GENERADA por cuota vencida (cartera-back). `pago_mora` es la
 						// cobrada en una fila de pago: una vencida sin pagos no la tiene.
-						const desglosePorCuota = new Map(
-							(creditoCompleto.desgloseMora?.cuotas ?? []).map((d) => [
-								d.numero_cuota,
-								d,
-							]),
-						);
+						// Un crédito legacy puede tener varias filas abiertas con el mismo
+						// `numero_cuota`: el cron genera mora por cada una y el plan las
+						// muestra como una sola cuota, así que se suman por número.
+						const desglosePorCuota = new Map<
+							number,
+							{
+								dias_atraso: number;
+								topada: boolean;
+								generado: string;
+								abonado: string;
+								pendiente: string;
+							}
+						>();
+						for (const d of creditoCompleto.desgloseMora?.cuotas ?? []) {
+							const previo = desglosePorCuota.get(d.numero_cuota);
+							const sumar = (a: string | undefined, b: string) =>
+								(
+									Math.round((Number(a ?? 0) + Number(b)) * 100) / 100
+								).toFixed(2);
+							desglosePorCuota.set(d.numero_cuota, {
+								dias_atraso: Math.max(previo?.dias_atraso ?? 0, d.dias_atraso),
+								topada: (previo?.topada ?? false) || d.topada,
+								generado: sumar(previo?.generado, d.generado),
+								abonado: sumar(previo?.abonado, d.abonado),
+								pendiente: sumar(previo?.pendiente, d.pendiente),
+							});
+						}
 
 						// Mapear a estructura esperada por frontend
 						return Array.from(cuotasUnicas.values())

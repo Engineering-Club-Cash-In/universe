@@ -102,8 +102,12 @@ const VERBO_ESTADO_NEGADO = new RegExp(
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
 	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido)|\\s+haber\\s+(?:tenido|sido|estado|presentado|registrado|reportado|mostrado|existido|habido|detectado|identificado|confirmado|comprobado|evidenciado|observado|encontrado|caido\\s+en|incurrido\\s+en)|\\s+(?:ser|estar|tener|presentar|registrar|reportar|mostrar|caer\\s+en|incurrir\\s+en))?|libre\\s+de|ausencia\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?(?:\\s+(?:cliente|clienta|clientes|deudor|deudora|deudores|titular|titulares|persona|personas))?\\s+$`,
 );
+// "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
+// También "sin (haber) incurrido / caído / entrado en mora".
+const VERBO_ESTADO_EN =
+	/(?:esta|estan|estuvo|estuvieron|estaba|estaban|encuentra|encuentran|encontraba|encontraban|encontro|encontraron|incurr(?:e|en|io|ieron|ido)|cae|caen|cay(?:o|eron)|caido|entr(?:a|an|o|aron|ado)|(?:ha|han|habia|habian)\s+(?:estado|caido|incurrido|entrado))/;
 const PREFIJO_NEGACION_COORDINADA = new RegExp(
-	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni\\s+$`,
+	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni(?:(?:\\s+se)?\\s+(?:${VERBO_ESTADO_NEGADO.source}|${VERBO_ESTADO_EN.source}\\s+en))?(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
 );
 const TERMINO_EVIDENCIA_NEGADA =
 	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?|registros?|riesgos?)/;
@@ -118,10 +122,6 @@ const PREFIJO_PROBLEMAS_NEGADOS =
 	/(?:^|\s)no\s+(?:tiene|tenia|tuvo|presenta|presentaba|presento|hay|habia|hubo|existen?|existia(?:n)?|registra|registraba|reporta|reportaba|(?:ha|han|habia|habian)\s+(?:tenido|presentado|habido))\s+(?:ningun[ao]?\s+)?problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
 	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|tenia|tuvo|hay|habia|hubo|existe(?:n)?|existia(?:n)?|presenta|presentaba|presento|cuenta\s+con|contaba\s+con|posee|poseia|adeuda|adeudaba|debe|debia|registra|registraba|reporta|reportaba|mantiene|mantenia))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
-// "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
-// También "sin (haber) incurrido / caído / entrado en mora".
-const VERBO_ESTADO_EN =
-	/(?:esta|estan|estuvo|estuvieron|estaba|estaban|encuentra|encuentran|encontraba|encontraban|encontro|encontraron|incurr(?:e|en|io|ieron|ido)|cae|caen|cay(?:o|eron)|caido|entr(?:a|an|o|aron|ado)|(?:ha|han|habia|habian)\s+(?:estado|caido|incurrido|entrado))/;
 const PREFIJO_ESTADO_EN_NEGADO = new RegExp(
 	`(?:^|\\s)(?:(?:no|nunca|jamas)(?:\\s+se)?\\s+${VERBO_ESTADO_EN.source}|sin\\s+(?:haber\\s+)?(?:estar|estado|caer|caido|incurrir|incurrido|entrar|entrado))\\s+en\\s+$`,
 );

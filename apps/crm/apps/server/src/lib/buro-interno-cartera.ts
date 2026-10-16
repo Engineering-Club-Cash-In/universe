@@ -121,7 +121,7 @@ const PREFIJO_DEUDA_NEGADA =
 // "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
 // También "sin (haber) incurrido / caído / entrado en mora".
 const VERBO_ESTADO_EN =
-	/(?:esta|estan|estuvo|estuvieron|estaba|estaban|encuentra|encuentran|encontraba|encontraban|encontro|encontraron|incurr(?:e|en|io|ieron|ido)|cae|caen|cay(?:o|eron)|caido|entr(?:a|an|o|aron|ado)|ha(?:n)?\s+(?:estado|caido|incurrido|entrado))/;
+	/(?:esta|estan|estuvo|estuvieron|estaba|estaban|encuentra|encuentran|encontraba|encontraban|encontro|encontraron|incurr(?:e|en|io|ieron|ido)|cae|caen|cay(?:o|eron)|caido|entr(?:a|an|o|aron|ado)|(?:ha|han|habia|habian)\s+(?:estado|caido|incurrido|entrado))/;
 const PREFIJO_ESTADO_EN_NEGADO = new RegExp(
 	`(?:^|\\s)(?:(?:no|nunca|jamas)(?:\\s+se)?\\s+${VERBO_ESTADO_EN.source}|sin\\s+(?:haber\\s+)?(?:estar|estado|caer|caido|incurrir|incurrido|entrar|entrado))\\s+en\\s+$`,
 );

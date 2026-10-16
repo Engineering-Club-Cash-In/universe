@@ -1136,6 +1136,10 @@ function cuotaDelPlan(
 		],
 		chips: [
 			...(esPagada && tieneMora ? ["Pagado con mora"] : []),
+			// Pagada, pero una fila hermana impaga (legacy duplicado) sigue en mora.
+			...(esPagada && Number(cuota.moraPendiente) > 0
+				? [`Mora pendiente ${fmtQ(cuota.moraPendiente)}`]
+				: []),
 			...(!esPagada && tieneMora && Number(cuota.diasMora) > 0
 				? [`${cuota.diasMora} días de mora`]
 				: []),

@@ -5790,9 +5790,10 @@ export const cobrosRouter = {
 							.sort((a, b) => a.numero_cuota - b.numero_cuota)
 							.map((cuota) => {
 								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
-								const desglose = cuota.pagado
-									? undefined
-									: desglosePorCuota.get(cuota.numero_cuota);
+								// También con la cuota pagada: un legacy con filas duplicadas
+								// puede tener la nueva pagada y la vieja impaga, y el cron sigue
+								// generando mora sobre la vieja.
+								const desglose = desglosePorCuota.get(cuota.numero_cuota);
 								const montoCuota = resolveInstallmentAmount(
 									cuota.cuota,
 									creditoCompleto.credito.cuota,

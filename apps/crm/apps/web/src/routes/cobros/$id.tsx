@@ -3991,6 +3991,10 @@ function RouteComponent() {
 													: Number(cuota.montoMora);
 												const tieneMora = moraMostrada > 0;
 												const pagoConMora = esPagada && tieneMora;
+												// Cuota pagada con una fila hermana impaga que sigue generando
+												// mora (legacy con filas duplicadas).
+												const moraPendienteDeDuplicada =
+													esPagada && Number(cuota.moraPendiente) > 0;
 												const abonado = esPagada
 													? 0
 													: Number(cuota.abonadoCuota ?? 0);
@@ -4019,6 +4023,7 @@ function RouteComponent() {
 														}
 														chips={
 															pagoConMora ||
+															moraPendienteDeDuplicada ||
 															(!esPagada &&
 																tieneMora &&
 																Number(cuota.diasMora) > 0) ||
@@ -4027,6 +4032,14 @@ function RouteComponent() {
 																	{pagoConMora && (
 																		<Badge className="bg-orange-100 text-orange-800 text-xs dark:bg-orange-950/40 dark:text-orange-300">
 																			Pagado con mora
+																		</Badge>
+																	)}
+																	{moraPendienteDeDuplicada && (
+																		<Badge
+																			variant="destructive"
+																			className="text-xs"
+																		>
+																			Mora pendiente {fmtQ(cuota.moraPendiente)}
 																		</Badge>
 																	)}
 																	{!esPagada &&

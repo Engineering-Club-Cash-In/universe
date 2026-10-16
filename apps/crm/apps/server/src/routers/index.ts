@@ -252,6 +252,7 @@ export const formsAppRouter = {
 	signCreditApplication: clientFormsRouter.signCreditApplication,
 	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
 	getClientFormData: clientFormsRouter.getClientFormData,
+	getReferenciasRepetidas: clientFormsRouter.getReferenciasRepetidas,
 	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
 
 	// Bank Analysis routes (Análisis de estados de cuenta)

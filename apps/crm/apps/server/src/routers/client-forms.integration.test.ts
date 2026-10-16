@@ -309,6 +309,11 @@ describe.skipIf(!esLocal || dbMockeado)(
 					(await call(router.getClientFormData, { opportunityId }, ctx))
 						.alertaReferencias,
 			],
+			[
+				"getReferenciasRepetidas",
+				(opportunityId, ctx = contexto) =>
+					call(router.getReferenciasRepetidas, { opportunityId }, ctx),
+			],
 		];
 
 		/** Las referencias repetidas de cada participante, en el orden de la alerta. */
@@ -1063,6 +1068,115 @@ describe.skipIf(!esLocal || dbMockeado)(
 				expect(texto).not.toContain("alertaReferencias");
 				expect(texto).not.toContain("OtroPublico");
 				expect(texto).not.toContain(otro);
+			});
+		});
+
+		describe("getReferenciasRepetidas: la pantalla de análisis", () => {
+			test("devuelve exactamente la alerta de «Formularios del Cliente»", async () => {
+				const otro = await crearLead("OtroIguales");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", relacion: "x", telefono: "72720001" },
+					{
+						nombre: "Ajena 2",
+						relacion: "x",
+						telefono: "72720002",
+						dpi: DPI_C,
+					},
+				]);
+				const yo = await crearLead("YoIguales");
+				const viejo = await crearLead("ViejoIguales");
+				const oppYo = await crearOpp(yo);
+				const co = await crearCodeudor(oppYo, "Codeudor Iguales", DPI_D);
+				const borradoConEnlace = "55555555-5555-4555-8555-555555555555";
+				const borradoSinEnlace = "66666666-6666-4666-8666-666666666666";
+				const ref = [{ nombre: "Mi P", telefono: "72720001" }];
+				await solicitudDe(oppYo, "lead", yo, ref, [
+					{ nombre: "Mi F", telefono: "1", dpi: DPI_C },
+				]);
+				await solicitudDe(oppYo, "coDebtor", co, ref);
+				await solicitudDe(oppYo, "lead", viejo, ref, null, "Vicente");
+				await solicitudDe(oppYo, "coDebtor", borradoConEnlace, ref);
+				await patrimonialDe(oppYo, "coDebtor", borradoConEnlace, "Pati");
+				await solicitudDe(
+					oppYo,
+					"coDebtor",
+					borradoSinEnlace,
+					ref,
+					null,
+					"Beto",
+				);
+				await solicitudDe(oppYo, null, null, ref, null, "Legado");
+				await crearEnlace(oppYo, "coDebtor", borradoConEnlace);
+
+				for (const rol of ["admin", "cobros"]) {
+					const { contexto: suyo } = await sesion(rol);
+					const completa = (
+						await call(router.getClientFormData, { opportunityId: oppYo }, suyo)
+					).alertaReferencias;
+					expect(completa.participantes).toHaveLength(6);
+					expect(
+						await call(
+							router.getReferenciasRepetidas,
+							{ opportunityId: oppYo },
+							suyo,
+						),
+					).toEqual(completa);
+				}
+			});
+
+			test("no lee firmas, formularios completos ni enlaces", async () => {
+				const otro = await crearLead("OtroColumnas");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", relacion: "x", telefono: "86860001" },
+				]);
+				const yo = await crearLead("YoColumnas");
+				const oppYo = await crearOpp(yo);
+				const borrado = "77777777-7777-4777-8777-777777777777";
+				// un histórico obliga a leer también los estados patrimoniales
+				await solicitudDe(oppYo, "coDebtor", borrado, [
+					{ nombre: "Mi", telefono: "86860001" },
+				]);
+
+				const consultas: string[] = [];
+				const original = pg.Client.prototype.query;
+				const espia = spyOn(pg.Client.prototype, "query").mockImplementation(
+					function (this: unknown, ...args: unknown[]) {
+						const texto = args[0];
+						consultas.push(
+							typeof texto === "string"
+								? texto
+								: String((texto as { text?: string })?.text ?? ""),
+						);
+						// biome-ignore lint/suspicious/noExplicitAny: passthrough
+						return (original as any).apply(this, args);
+					} as never,
+				);
+				try {
+					const alerta = await call(
+						router.getReferenciasRepetidas,
+						{ opportunityId: oppYo },
+						contexto,
+					);
+					expect(alerta.participantes).toHaveLength(1);
+				} finally {
+					espia.mockRestore();
+				}
+				const todas = consultas.join("\n");
+				expect(todas).toContain('from "financial_statements"');
+				expect(todas).not.toContain("firma_imagen");
+				expect(todas).not.toContain("client_form_tokens");
+				expect(
+					consultas.some((c) => /select\s+"id",\s*"opportunity_id"/i.test(c)),
+				).toBe(false);
+			});
+
+			test("sin rol de clientes: FORBIDDEN", async () => {
+				const yo = await crearLead("YoSinRol");
+				const oppYo = await crearOpp(yo);
+				const { contexto: suyo } = await sesion("service_center_manager");
+				await expect(
+					call(router.getReferenciasRepetidas, { opportunityId: oppYo }, suyo),
+				).rejects.toMatchObject({ code: "FORBIDDEN" });
 			});
 		});
 	},

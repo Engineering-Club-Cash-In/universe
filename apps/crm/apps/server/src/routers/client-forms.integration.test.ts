@@ -14,11 +14,19 @@
  * el `db` compartido apunte a esa misma base; si no, la suite aborta sin tocar
  * ninguna.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	spyOn,
+	test,
+} from "bun:test";
 import { call } from "@orpc/server";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import pg, { Pool } from "pg";
 
 const URL_PRUEBAS = process.env.CRM_TEST_DATABASE_URL ?? "";
 const hostPruebas = URL_PRUEBAS ? new URL(URL_PRUEBAS).hostname : "";
@@ -47,6 +55,12 @@ if (esLocal && dbMockeado) {
 	);
 }
 
+const DPI_A = "2345678990101";
+const DPI_B = "1234567030101";
+const DPI_C = "3456789070101";
+const DPI_D = "4567890140101";
+const DPI_E = "5678901200101";
+
 describe.skipIf(!esLocal || dbMockeado)(
 	"router de formularios del cliente (Postgres real)",
 	() => {
@@ -59,6 +73,17 @@ describe.skipIf(!esLocal || dbMockeado)(
 		let router: any;
 		let stageId: string;
 		const usuario = `u-cf-${Date.now()}`;
+		const usuarios: string[] = [];
+
+		/** Un usuario del CRM con ese rol, y el contexto de su sesión. */
+		async function sesion(rol: string) {
+			const id = `${usuario}-${rol}-${usuarios.length}`;
+			usuarios.push(id);
+			await db.execute(sql`
+				INSERT INTO "user" (id, name, email, email_verified, role, created_at, updated_at)
+				VALUES (${id}, ${rol}, ${`${id}@t.test`}, true, ${rol}, now(), now())`);
+			return { id, contexto: { context: { session: { user: { id } } } } };
+		}
 
 		async function crearLead(nombre: string, dpi?: string): Promise<string> {
 			const r = await db.execute(sql`
@@ -161,17 +186,27 @@ describe.skipIf(!esLocal || dbMockeado)(
 			listo = true;
 		});
 
-		afterAll(async () => {
-			if (!listo || !db || !pool) return;
+		/** Cada prueba arranca sin los clientes de las anteriores (sus formularios caen en cascada). */
+		async function borrarClientes() {
 			await db.execute(
 				sql`DELETE FROM opportunities WHERE created_by = ${usuario}`,
 			);
 			await db.execute(sql`DELETE FROM leads WHERE created_by = ${usuario}`);
+		}
+		afterEach(async () => {
+			if (listo) await borrarClientes();
+		});
+
+		afterAll(async () => {
+			if (!listo || !db || !pool) return;
+			await borrarClientes();
 			if (stageId)
 				await db.execute(
 					sql`DELETE FROM sales_stages WHERE id = ${stageId}::uuid`,
 				);
-			await db.execute(sql`DELETE FROM "user" WHERE id = ${usuario}`);
+			for (const id of [...usuarios, usuario]) {
+				await db.execute(sql`DELETE FROM "user" WHERE id = ${id}`);
+			}
 			await pool.end();
 		});
 
@@ -237,6 +272,797 @@ describe.skipIf(!esLocal || dbMockeado)(
 				expect(await nombre()).toBe("Pati");
 				await solicitudDe(opp, null, null, [], null, "Sol");
 				expect(await nombre()).toBe("Sol Formulario");
+			});
+		});
+
+		type Alerta = {
+			nivel: string;
+			error: boolean;
+			participantes: {
+				personType: string;
+				personId: string;
+				nombre: string;
+				etiqueta: string;
+				referencias: {
+					tipo: string;
+					indice: number;
+					nombre: string;
+					dpi: string;
+					total: number;
+					coincidencias?: Record<string, unknown>[];
+				}[];
+			}[];
+		} | null;
+		type Contexto = typeof contexto;
+
+		/**
+		 * Los endpoints que devuelven la alerta. Las mismas pruebas corren contra
+		 * cada uno: comparten el cableado (exclusiones, lote, permisos, errores).
+		 */
+		const endpoints: [
+			string,
+			(opp: string, ctx?: Contexto) => Promise<Alerta>,
+		][] = [
+			[
+				"getClientFormData",
+				async (opportunityId, ctx = contexto) =>
+					(await call(router.getClientFormData, { opportunityId }, ctx))
+						.alertaReferencias,
+			],
+		];
+
+		/** Las referencias repetidas de cada participante, en el orden de la alerta. */
+		const porParticipante = (alerta: Alerta) =>
+			(alerta?.participantes ?? []).map((p) => p.referencias);
+		const leadsDe = (referencia: {
+			coincidencias?: Record<string, unknown>[];
+		}) => (referencia.coincidencias ?? []).map((c) => c.leadId);
+
+		describe.each(
+			endpoints,
+		)("alerta de referencias repetidas: %s", (_, alertaDe) => {
+			test("por participante (titular y codeudor), con la forma esperada", async () => {
+				const otro = await crearLead("OtroEndpoint");
+				const oppOtro = await crearOpp(otro);
+				await solicitudDe(oppOtro, null, null, [
+					{
+						nombre: "Compartida",
+						relacion: "tio",
+						telefono: "91910000",
+						dpi: DPI_D,
+					},
+					{ nombre: "Del Codeudor Ajeno", relacion: "x", telefono: "92920000" },
+				]);
+				const yo = await crearLead("YoEndpoint");
+				const oppYo = await crearOpp(yo);
+				const co = await crearCodeudor(oppYo, "Codeudor Mio", DPI_D);
+				await solicitudDe(oppYo, "lead", yo, [
+					{
+						nombre: "Compartida",
+						relacion: "tio",
+						telefono: "00001111",
+						dpi: DPI_D,
+					},
+					{ nombre: "Limpia", relacion: "x", telefono: "13572468" },
+				]);
+				await solicitudDe(oppYo, "coDebtor", co, [
+					{
+						nombre: "Otra Compartida",
+						relacion: "x",
+						telefono: "+502 9292-0000",
+					},
+				]);
+
+				const alerta = await alertaDe(oppYo);
+				expect(alerta).toMatchObject({ nivel: "detalle", error: false });
+				const [titular, codeudor] = alerta?.participantes ?? [];
+				expect(titular).toMatchObject({
+					personType: "lead",
+					personId: yo,
+					nombre: "YoEndpoint Prueba",
+					etiqueta: "Titular",
+				});
+				expect(titular.referencias).toHaveLength(1);
+				expect(titular.referencias[0]).toMatchObject({
+					tipo: "personal",
+					indice: 0,
+					nombre: "Compartida",
+					dpi: DPI_D,
+					total: 1,
+				});
+				expect(titular.referencias[0].coincidencias?.[0]).toMatchObject({
+					tipo: "personal",
+					leadId: otro,
+					clienteNombre: "OtroEndpoint Prueba",
+					oportunidadId: oppOtro,
+					referenciaNombre: "Compartida",
+					parentesco: "tio",
+					dadaPor: { nombre: "OtroEndpoint Prueba", rol: "titular" },
+					coincidePor: "dpi",
+				});
+				// el reparto del lote: la referencia del codeudor llega al codeudor
+				expect(codeudor).toMatchObject({
+					personType: "coDebtor",
+					personId: co,
+					nombre: "Codeudor Mio",
+					etiqueta: "Co-firmante 1",
+				});
+				expect(codeudor.referencias).toHaveLength(1);
+				expect(codeudor.referencias[0]).toMatchObject({
+					nombre: "Otra Compartida",
+					total: 1,
+				});
+				expect(codeudor.referencias[0].coincidencias?.[0]).toMatchObject({
+					leadId: otro,
+					referenciaNombre: "Del Codeudor Ajeno",
+					coincidePor: "telefono",
+				});
+			});
+
+			test("nombre y DPI nulos o numéricos en el JSONB llegan como texto, nunca «null»", async () => {
+				const otro = await crearLead("OtroNulos");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", telefono: "93930000" },
+				]);
+				const yo = await crearLead("YoNulos");
+				const oppYo = await crearOpp(yo);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: null, dpi: null, telefono: "93930000" },
+					{ nombre: 42, telefono: "+502 9393-0000" },
+				]);
+				const [titular] = porParticipante(await alertaDe(oppYo));
+				expect(titular.map((r) => [r.nombre, r.dpi])).toEqual([
+					["", ""],
+					["42", ""],
+				]);
+			});
+
+			test("reparte bien las dos listas: la familiar y la personal de cada participante, con su tipo e índice", async () => {
+				const otro = await crearLead("OtroDeListas");
+				await solicitudDe(
+					await crearOpp(otro),
+					"lead",
+					otro,
+					[
+						{
+							nombre: "Personal Ajena",
+							relacion: "amiga",
+							telefono: "71710001",
+						},
+					],
+					[{ nombre: "Familiar Ajena", telefono: "71710002", dpi: DPI_E }],
+				);
+				const yo = await crearLead("YoDeListas");
+				const oppYo = await crearOpp(yo);
+				const co = await crearCodeudor(oppYo, "Codeudor Listas", DPI_E);
+				// titular: la PERSONAL en la posición 1 coincide; el codeudor: la FAMILIAR en la 1
+				await solicitudDe(
+					oppYo,
+					"lead",
+					yo,
+					[
+						{ nombre: "Limpia P", telefono: "35792468" },
+						{ nombre: "Mi Personal", telefono: "+502 7171-0001" },
+					],
+					[{ nombre: "Limpia F", telefono: "24681357" }],
+				);
+				await solicitudDe(
+					oppYo,
+					"coDebtor",
+					co,
+					[{ nombre: "Limpia P2", telefono: "36925814" }],
+					[
+						{ nombre: "Limpia F2", telefono: "14725836" },
+						{
+							nombre: "Su Familiar",
+							telefono: "99990000",
+							dpi: "5678 90120 0101",
+						},
+					],
+				);
+				const [titular, codeudor] = porParticipante(await alertaDe(oppYo));
+				expect(titular).toHaveLength(1);
+				expect(titular[0]).toMatchObject({
+					tipo: "personal",
+					indice: 1,
+					nombre: "Mi Personal",
+				});
+				expect(titular[0].coincidencias?.[0]).toMatchObject({
+					tipo: "personal",
+					referenciaNombre: "Personal Ajena",
+					coincidePor: "telefono",
+				});
+				expect(codeudor).toHaveLength(1);
+				expect(codeudor[0]).toMatchObject({
+					tipo: "familiar",
+					indice: 1,
+					nombre: "Su Familiar",
+					total: 1,
+				});
+				expect(codeudor[0].coincidencias?.[0]).toMatchObject({
+					tipo: "familiar",
+					referenciaNombre: "Familiar Ajena",
+					coincidePor: "dpi",
+				});
+			});
+
+			test("un cliente con OTRA oportunidad propia no se alerta a sí mismo (excluye el lead)", async () => {
+				const yo = await crearLead("YoDosOpps");
+				const oppUno = await crearOpp(yo);
+				const oppDos = await crearOpp(yo);
+				await solicitudDe(oppUno, "lead", yo, [
+					{ nombre: "De la uno", telefono: "81810101" },
+				]);
+				await solicitudDe(oppDos, "lead", yo, [
+					{ nombre: "De la dos", telefono: "81810101" },
+				]);
+				expect(porParticipante(await alertaDe(oppDos))).toEqual([]);
+				// control: un cliente distinto con esa referencia sí alerta
+				const otro = await crearLead("OtroDosOpps");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", relacion: "x", telefono: "81810101" },
+				]);
+				const [[referencia]] = porParticipante(await alertaDe(oppDos));
+				expect(leadsDe(referencia)).toEqual([otro]);
+			});
+
+			test("dentro de la misma oportunidad (sin lead) titular y codeudor no se alertan entre sí (excluye la oportunidad)", async () => {
+				const oppSinLead = await crearOpp(null);
+				const co = await crearCodeudor(oppSinLead, "Codeudor Sin Lead", DPI_D);
+				await solicitudDe(oppSinLead, null, null, [
+					{ nombre: "Compartida", relacion: "x", telefono: "82820202" },
+				]);
+				await solicitudDe(oppSinLead, "coDebtor", co, [
+					{ nombre: "Compartida", telefono: "82820202" },
+				]);
+				expect(await alertaDe(oppSinLead)).toEqual({
+					nivel: "detalle",
+					error: false,
+					participantes: [],
+				});
+			});
+
+			test("la misma persona con otro lead (mismo DPI) no es «otro cliente»", async () => {
+				const DPI_PERSONA = "6789012360101";
+				const yo = await crearLead("PersonaRouter", DPI_PERSONA);
+				const oppYo = await crearOpp(yo);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: "Mi ref", telefono: "83830303" },
+				]);
+				const repetido = await crearLead(
+					"PersonaRouterRepetida",
+					"6789 01236 0101",
+				);
+				await solicitudDe(await crearOpp(repetido), null, null, [
+					{ nombre: "Ref repetida", relacion: "x", telefono: "83830303" },
+				]);
+				expect(porParticipante(await alertaDe(oppYo))).toEqual([]);
+				const ajeno = await crearLead("AjenoRouter", DPI_D);
+				await solicitudDe(await crearOpp(ajeno), null, null, [
+					{ nombre: "Ref ajena", relacion: "x", telefono: "83830303" },
+				]);
+				const [[referencia]] = porParticipante(await alertaDe(oppYo));
+				expect(leadsDe(referencia)).toEqual([ajeno]);
+			});
+
+			test("un codeudor que fue titular de su propio lead no se marca a sí mismo", async () => {
+				const DPI_CODEUDOR = "6789012360101";
+				const yo = await crearLead("TitularCodeudor", DPI_D);
+				const oppYo = await crearOpp(yo);
+				const co = await crearCodeudor(
+					oppYo,
+					"Codeudor Que Fue Titular",
+					DPI_CODEUDOR,
+				);
+				await solicitudDe(oppYo, "coDebtor", co, [
+					{ nombre: "Mi ref", telefono: "84840404" },
+				]);
+				const suLead = await crearLead("SuPropioLead", DPI_CODEUDOR);
+				await solicitudDe(await crearOpp(suLead), null, null, [
+					{ nombre: "Mi ref de antes", relacion: "x", telefono: "84840404" },
+				]);
+				expect(porParticipante(await alertaDe(oppYo))).toEqual([]);
+			});
+
+			test("la titular que fue codeudora en otro crédito no se alerta por lo que ella dio allí", async () => {
+				const DPI_PERSONA = "6789012360101";
+				const otro = await crearLead("OtroConCodeudora", DPI_C);
+				const oppOtro = await crearOpp(otro);
+				const ella = await crearCodeudor(
+					oppOtro,
+					"Ella Como Codeudora",
+					"6789 01236 0101",
+				);
+				const ajeno = await crearCodeudor(oppOtro, "Codeudor Ajeno", DPI_E);
+				await solicitudDe(oppOtro, "coDebtor", ella, [
+					{ nombre: "La de ella", telefono: "85850101" },
+				]);
+				await solicitudDe(oppOtro, "coDebtor", ajeno, [
+					{ nombre: "La del otro", telefono: "85850102" },
+				]);
+
+				const yo = await crearLead("EllaTitular", DPI_PERSONA);
+				const oppYo = await crearOpp(yo);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: "Mi ref", telefono: "85850101" },
+					{ nombre: "Mi otra ref", telefono: "85850102" },
+				]);
+				const [titular] = porParticipante(await alertaDe(oppYo));
+				// solo la que dio el otro codeudor de ese crédito
+				expect(titular.map((r) => r.nombre)).toEqual(["Mi otra ref"]);
+			});
+
+			test("quien dejó su solicitud en otra oportunidad (titular cambiado o codeudor borrado) no se alerta a sí mismo", async () => {
+				const DPI_VICENTE = "6789012360101";
+				const vicente = await crearLead("Vicente", DPI_VICENTE);
+				// la oportunidad vieja era de Vicente; hoy su titular es Ana
+				const oppVieja = await crearOpp(await crearLead("Ana", DPI_C));
+				await solicitudDe(oppVieja, "lead", vicente, [
+					{ nombre: "Y", telefono: "81810201" },
+				]);
+				// en otra, Vicente fue codeudor y lo borraron; su solicitud quedó
+				const oppOtra = await crearOpp(await crearLead("Otra", DPI_E));
+				await db.execute(sql`
+					INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+					VALUES (${oppOtra}::uuid, 'coDebtor', '99999999-9999-4999-8999-999999999999', ${DPI_VICENTE}, ${JSON.stringify([{ nombre: "Z", telefono: "81810202" }])}::jsonb)`);
+
+				const oppNueva = await crearOpp(vicente);
+				await solicitudDe(oppNueva, "lead", vicente, [
+					{ nombre: "Y", telefono: "81810201" },
+					{ nombre: "Z", telefono: "81810202" },
+				]);
+				expect(porParticipante(await alertaDe(oppNueva))).toEqual([]);
+			});
+
+			test("un histórico de la oportunidad revisada no se alerta a sí mismo (titular cambiado y codeudor borrado)", async () => {
+				const ana = await crearLead("Ana", DPI_A);
+				const vicente = await crearLead("Vicente", DPI_B);
+				const opp1 = await crearOpp(ana);
+				// Vicente era el titular de opp1 y dejó ahí su solicitud
+				await solicitudDe(opp1, "lead", vicente, [
+					{ nombre: "YV", telefono: "82820301" },
+				]);
+				// un codeudor que ya borraron dejó la suya, con su DPI escrito
+				await db.execute(sql`
+					INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+					VALUES (${opp1}::uuid, 'coDebtor', '77777777-7777-4777-8777-777777777771', ${DPI_E}, ${JSON.stringify([{ nombre: "ZB", telefono: "82820302" }])}::jsonb)`);
+				// cada uno tiene su propia oportunidad con la misma referencia
+				await solicitudDe(await crearOpp(vicente), "lead", vicente, [
+					{ nombre: "YV", telefono: "82820301" },
+				]);
+				const elBorrado = await crearLead("ElBorradoComoTitular", DPI_E);
+				await solicitudDe(await crearOpp(elBorrado), "lead", elBorrado, [
+					{ nombre: "ZB", telefono: "82820302" },
+				]);
+				expect(porParticipante(await alertaDe(opp1))).toEqual([]);
+			});
+
+			test("la misma titular con un lead duplicado sin DPI: lo que dio su codeudora no la alerta, desde ninguna de las dos oportunidades", async () => {
+				const ana = await crearLead("Ana", DPI_A);
+				const opp1 = await crearOpp(ana);
+				await solicitudDe(opp1, "lead", ana, [
+					{ nombre: "Rosa", telefono: "82820401" },
+				]);
+				// Ana otra vez, en un lead sin DPI; su DPI solo está en su solicitud
+				const anaDup = await crearLead("Ana Dup");
+				const opp8 = await crearOpp(anaDup);
+				await db.execute(sql`
+					INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+					VALUES (${opp8}::uuid, 'lead', ${anaDup}::uuid, ${DPI_A}, '[]'::jsonb)`);
+				const vera = await crearCodeudor(opp8, "Vera  Codeudora", DPI_C);
+				await solicitudDe(opp8, "coDebtor", vera, [
+					{ nombre: "Rosa por V", telefono: "82820401" },
+				]);
+				expect(porParticipante(await alertaDe(opp1))).toEqual([]);
+				expect(porParticipante(await alertaDe(opp8))).toEqual([]);
+			});
+
+			test("un lead duplicado sin DPI es la misma persona en toda la base: ni cobros ni su codeudor alertan, desde ninguna oportunidad", async () => {
+				const ana = await crearLead("Ana", DPI_A);
+				const oppC = await crearOpp(ana);
+				await solicitudDe(oppC, "lead", ana, [
+					{ nombre: "P", telefono: "82820501" },
+					{ nombre: "Q", telefono: "82820502" },
+				]);
+				const anaDup = await crearLead("Ana Cobros");
+				const oppB = await crearOpp(anaDup);
+				await db.execute(sql`
+					INSERT INTO credit_applications (opportunity_id, person_type, person_id, dpi, referencias_personales)
+					VALUES (${oppB}::uuid, 'lead', ${anaDup}::uuid, ${DPI_A}, ${JSON.stringify([{ nombre: "P", telefono: "82820501" }])}::jsonb)`);
+				await db.execute(sql`
+					INSERT INTO referencias_lead (lead_id, nombre, telefono, parentesco)
+					VALUES (${anaDup}::uuid, 'Ref cobros', '82820501', 'amigo_a')`);
+				const oppD = await crearOpp(anaDup);
+				const walter = await crearCodeudor(oppD, "Walter", DPI_E);
+				await solicitudDe(oppD, "coDebtor", walter, [
+					{ nombre: "W", telefono: "82820502" },
+				]);
+				for (const opp of [oppC, oppB, oppD]) {
+					expect(porParticipante(await alertaDe(opp))).toEqual([]);
+				}
+			});
+
+			test("lo que el titular anterior dejó en una oportunidad que hoy es mía sí me alerta, a nombre de él", async () => {
+				const ana = await crearLead("Ana", DPI_A);
+				const vicente = await crearLead("Vicente", DPI_B);
+				const opp1 = await crearOpp(ana);
+				await solicitudDe(opp1, "lead", vicente, [
+					{ nombre: "S", telefono: "82820303" },
+				]);
+				const opp7 = await crearOpp(ana);
+				await solicitudDe(opp7, "lead", ana, [
+					{ nombre: "S", telefono: "82820303" },
+				]);
+				const [[referencia]] = porParticipante(await alertaDe(opp7));
+				expect(referencia.coincidencias).toEqual([
+					expect.objectContaining({
+						leadId: vicente,
+						clienteNombre: "Vicente Prueba",
+						oportunidadId: opp1,
+						dadaPor: { nombre: "Vicente Prueba", rol: "titular" },
+					}),
+				]);
+			});
+
+			test("un DPI del revisado con verificador inválido igual lo excluye", async () => {
+				const DPI_MAL = "1234567890123";
+				const yo = await crearLead("YoTitular", DPI_A);
+				const oppYo = await crearOpp(yo);
+				const co = await crearCodeudor(oppYo, "Codeudor Dpi Mal", DPI_MAL);
+				await solicitudDe(oppYo, "coDebtor", co, [
+					{ nombre: "Mi", telefono: "82820304" },
+				]);
+				// el mismo codeudor es titular en otro lado, con su DPI escrito distinto
+				const suLead = await crearLead(
+					"CodeudorComoTitular",
+					"1234 56789 0123",
+				);
+				await solicitudDe(await crearOpp(suLead), "lead", suLead, [
+					{ nombre: "Mi", telefono: "82820304" },
+				]);
+				expect(porParticipante(await alertaDe(oppYo))).toEqual([]);
+			});
+
+			test("lo que dio el codeudor de otra oportunidad mía no me alerta: el cliente soy yo", async () => {
+				const yo = await crearLead("YoConOtra", DPI_A);
+				const oppYo = await crearOpp(yo);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: "Mi", telefono: "82820305" },
+				]);
+				const oppOtra = await crearOpp(yo);
+				const co = await crearCodeudor(oppOtra, "Codeudor De Mi Otra", DPI_E);
+				await solicitudDe(oppOtra, "coDebtor", co, [
+					{ nombre: "R", telefono: "82820305" },
+				]);
+				expect(porParticipante(await alertaDe(oppYo))).toEqual([]);
+			});
+
+			test("revisa hasta 10 referencias por lista, aunque datos viejos traigan miles", async () => {
+				const otro = await crearLead("OtroTope");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena 10", telefono: "86860010" },
+					{ nombre: "Ajena 11", telefono: "86860011" },
+				]);
+				const yo = await crearLead("YoTope");
+				const oppYo = await crearOpp(yo);
+				const muchas = Array.from({ length: 40_001 }, (_, i) => ({
+					nombre: `Ref ${i + 1}`,
+					telefono:
+						i === 9
+							? "86860010"
+							: i === 10
+								? "86860011"
+								: `2${String(i).padStart(7, "1")}`,
+				}));
+				await solicitudDe(oppYo, "lead", yo, muchas);
+				const alerta = await alertaDe(oppYo);
+				expect(alerta?.error).toBe(false);
+				// la décima entra; la undécima ya no se revisa
+				expect(porParticipante(alerta)[0].map((r) => r.nombre)).toEqual([
+					"Ref 10",
+				]);
+			});
+
+			test("quien dejó solicitud y ya no figura sale como histórico, aunque no tenga enlace; titular primero y codeudores en orden", async () => {
+				const otro = await crearLead("OtroHistoricos");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", relacion: "x", telefono: "87870001" },
+				]);
+				const viejo = await crearLead("TitularViejo");
+				const nuevo = await crearLead("TitularNuevo");
+				const oppYo = await crearOpp(nuevo);
+				// el segundo se guarda antes, pero se creó después: manda la fecha
+				const codeudor = async (nombre: string, dpi: string, creado: string) =>
+					(
+						await db.execute(sql`
+							INSERT INTO co_debtors (opportunity_id, full_name, dpi, created_at)
+							VALUES (${oppYo}::uuid, ${nombre}, ${dpi}, ${creado}::timestamp) RETURNING id::text AS id`)
+					).rows[0].id;
+				const c2 = await codeudor("Segundo", DPI_B, "2026-01-02");
+				const c1 = await codeudor("Primero", DPI_A, "2026-01-01");
+				const borrado = "33333333-3333-4333-8333-333333333333";
+				const ref = [{ nombre: "Mi ref", telefono: "87870001" }];
+				// se insertan al revés del orden esperado
+				await solicitudDe(oppYo, "coDebtor", borrado, ref, null, "Beto");
+				await solicitudDe(oppYo, "lead", viejo, ref, null, "Vicente");
+				await solicitudDe(oppYo, "coDebtor", c2, ref);
+				await solicitudDe(oppYo, "coDebtor", c1, ref);
+				await solicitudDe(oppYo, "lead", nuevo, ref);
+
+				const alerta = await alertaDe(oppYo);
+				expect(
+					alerta?.participantes.map((p) => `${p.etiqueta}: ${p.nombre}`),
+				).toEqual([
+					"Titular: TitularNuevo Prueba",
+					"Co-firmante 1: Primero",
+					"Co-firmante 2: Segundo",
+					"Co-firmante historico: Beto Formulario",
+					"Titular historico: Vicente Formulario",
+				]);
+			});
+
+			test("si la búsqueda falla lo dice (error), sin confundirlo con «sin coincidencias»", async () => {
+				const yo = await crearLead("YoFalla");
+				const oppYo = await crearOpp(yo);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: "A", telefono: "16161617", dpi: DPI_D },
+				]);
+				expect(await alertaDe(oppYo)).toMatchObject({ error: false });
+
+				const error = spyOn(console, "error").mockImplementation(() => {});
+				// Como el de drizzle: el mensaje trae los parámetros de la consulta.
+				const espia = spyOn(dbCompartido, "execute").mockRejectedValueOnce(
+					new Error(`Failed query: SELECT ... params: ${DPI_D},16161617`),
+				);
+				try {
+					expect(await alertaDe(oppYo)).toEqual({
+						nivel: "detalle",
+						error: true,
+						participantes: [],
+					});
+					const log = Bun.inspect(error.mock.calls);
+					expect(log).toContain(oppYo);
+					expect(log).not.toContain(DPI_D);
+					expect(log).not.toContain("16161617");
+				} finally {
+					espia.mockRestore();
+					error.mockRestore();
+				}
+			});
+
+			describe("permisos", () => {
+				/** Otro cliente con la referencia, y la oportunidad que se revisa, asignada a `asignadaA`. */
+				async function escenario(asignadaA: string) {
+					const otro = await crearLead("ClienteAjenoSecreto");
+					const oppOtro = await crearOpp(otro);
+					await solicitudDe(oppOtro, null, null, [
+						{
+							nombre: "Ref Del Ajeno",
+							relacion: "primo",
+							telefono: "88880001",
+						},
+					]);
+					const yo = await crearLead("YoPermisos");
+					const oppYo = await crearOpp(yo, asignadaA);
+					await solicitudDe(oppYo, "lead", yo, [
+						{ nombre: "Mi ref", telefono: "88880001", dpi: DPI_A },
+					]);
+					return { otro, oppOtro, oppYo };
+				}
+				/** El aviso no deja salir NADA del otro cliente. */
+				function soloAviso(
+					alerta: Alerta,
+					ajeno: { otro: string; oppOtro: string },
+				) {
+					expect(alerta).toMatchObject({ nivel: "aviso", error: false });
+					expect(alerta?.participantes[0].referencias).toEqual([
+						{
+							tipo: "personal",
+							indice: 0,
+							nombre: "Mi ref",
+							dpi: DPI_A,
+							total: 1,
+						},
+					]);
+					const texto = JSON.stringify(alerta);
+					for (const dato of [
+						ajeno.otro,
+						ajeno.oppOtro,
+						"ClienteAjenoSecreto",
+						"Ref Del Ajeno",
+						"primo",
+					]) {
+						expect(texto).not.toContain(dato);
+					}
+				}
+
+				test.each([
+					"admin",
+					"analyst",
+					"sales_supervisor",
+				])("%s ve el detalle", async (rol) => {
+					const { otro, oppYo } = await escenario(usuario);
+					const { contexto: suyo } = await sesion(rol);
+					const alerta = await alertaDe(oppYo, suyo);
+					expect(alerta?.nivel).toBe("detalle");
+					expect(
+						leadsDe(alerta?.participantes[0].referencias[0] ?? {}),
+					).toEqual([otro]);
+				});
+
+				test("ventas, en su oportunidad, recibe solo el aviso", async () => {
+					const { id, contexto: suyo } = await sesion("sales");
+					const ajeno = await escenario(id);
+					soloAviso(await alertaDe(ajeno.oppYo, suyo), ajeno);
+				});
+
+				test.each([
+					"cobros",
+					"accounting",
+					"juridico",
+				])("%s recibe solo el aviso", async (rol) => {
+					const ajeno = await escenario(usuario);
+					const { contexto: suyo } = await sesion(rol);
+					soloAviso(await alertaDe(ajeno.oppYo, suyo), ajeno);
+				});
+
+				test("ventas, en una oportunidad ajena, no recibe nada ni dispara la búsqueda", async () => {
+					const { oppYo } = await escenario(usuario);
+					const { contexto: suyo } = await sesion("sales");
+					const espia = spyOn(dbCompartido, "execute");
+					try {
+						expect(await alertaDe(oppYo, suyo)).toBeNull();
+						expect(espia).not.toHaveBeenCalled();
+					} finally {
+						espia.mockRestore();
+					}
+				});
+
+				test("sin sesión: UNAUTHORIZED", async () => {
+					const { oppYo } = await escenario(usuario);
+					await expect(
+						alertaDe(oppYo, { context: {} } as never),
+					).rejects.toMatchObject({
+						code: "UNAUTHORIZED",
+					});
+				});
+			});
+		});
+
+		describe("getClientFormData: lo que no cambia con la alerta", () => {
+			test("hace UNA sola búsqueda para todos los participantes", async () => {
+				const yo = await crearLead("YoUnaBusqueda");
+				const oppYo = await crearOpp(yo);
+				const co = await crearCodeudor(oppYo, "Codeudor Uno", DPI_D);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: "A", telefono: "14253647" },
+				]);
+				await solicitudDe(oppYo, "coDebtor", co, [
+					{ nombre: "B", telefono: "15263748" },
+				]);
+
+				const espia = spyOn(dbCompartido, "execute");
+				try {
+					await call(
+						router.getClientFormData,
+						{ opportunityId: oppYo },
+						contexto,
+					);
+					expect(espia).toHaveBeenCalledTimes(1);
+				} finally {
+					espia.mockRestore();
+				}
+			});
+
+			test("lee codeudores y solicitudes UNA vez cada uno: la alerta usa lo ya leído", async () => {
+				const otro = await crearLead("OtroLecturas");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", telefono: "89890001" },
+				]);
+				const yo = await crearLead("YoLecturas");
+				const oppYo = await crearOpp(yo);
+				await crearCodeudor(oppYo, "Codeudor Lecturas", DPI_D);
+				await solicitudDe(oppYo, "lead", yo, [
+					{ nombre: "Mi", telefono: "89890001" },
+				]);
+
+				const consultas: string[] = [];
+				const original = pg.Client.prototype.query;
+				const espia = spyOn(pg.Client.prototype, "query").mockImplementation(
+					function (this: unknown, ...args: unknown[]) {
+						const texto = args[0];
+						consultas.push(
+							typeof texto === "string"
+								? texto
+								: String((texto as { text?: string })?.text ?? ""),
+						);
+						// biome-ignore lint/suspicious/noExplicitAny: passthrough
+						return (original as any).apply(this, args);
+					} as never,
+				);
+				try {
+					const data = await call(
+						router.getClientFormData,
+						{ opportunityId: oppYo },
+						contexto,
+					);
+					expect(data.alertaReferencias.participantes).toHaveLength(1);
+				} finally {
+					espia.mockRestore();
+				}
+				const cuantas = (tabla: string) =>
+					consultas.filter((c) => new RegExp(`from "${tabla}"`, "i").test(c))
+						.length;
+				expect(cuantas("co_debtors")).toBe(1);
+				expect(cuantas("credit_applications")).toBe(1);
+			});
+
+			test("las tarjetas no cambian: el histórico sin enlace solo aparece en la alerta", async () => {
+				const otro = await crearLead("OtroTarjetas");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{ nombre: "Ajena", telefono: "90900001" },
+				]);
+				const yo = await crearLead("YoTarjetas");
+				const oppYo = await crearOpp(yo);
+				const borrado = "44444444-4444-4444-8444-444444444444";
+				await solicitudDe(
+					oppYo,
+					"coDebtor",
+					borrado,
+					[{ nombre: "Mi", telefono: "90900001" }],
+					null,
+					"Beto",
+				);
+
+				const data = await call(
+					router.getClientFormData,
+					{ opportunityId: oppYo },
+					contexto,
+				);
+				expect(
+					data.participants.map((p: { personId: string }) => p.personId),
+				).toEqual([yo]);
+				expect(
+					data.alertaReferencias.participantes.map(
+						(p: { personId: string; etiqueta: string }) => [
+							p.personId,
+							p.etiqueta,
+						],
+					),
+				).toEqual([[borrado, "Co-firmante historico"]]);
+			});
+
+			test("el endpoint público por enlace no expone la alerta ni datos de otros clientes", async () => {
+				const otro = await crearLead("OtroPublico");
+				await solicitudDe(await crearOpp(otro), null, null, [
+					{
+						nombre: "Compartida",
+						relacion: "x",
+						telefono: "17171718",
+						dpi: DPI_D,
+					},
+				]);
+				const yo = await crearLead("YoPublico");
+				const oppYo = await crearOpp(yo);
+				await solicitudDe(oppYo, "lead", yo, [
+					{
+						nombre: "Compartida",
+						relacion: "x",
+						telefono: "18181819",
+						dpi: DPI_D,
+					},
+				]);
+				const enlace = await crearEnlace(oppYo, "lead", yo);
+				const texto = JSON.stringify(
+					await call(
+						router.validateFormToken,
+						{ token: enlace },
+						{ context: {} },
+					),
+				);
+				expect(texto).not.toContain("alertaReferencias");
+				expect(texto).not.toContain("OtroPublico");
+				expect(texto).not.toContain(otro);
 			});
 		});
 	},

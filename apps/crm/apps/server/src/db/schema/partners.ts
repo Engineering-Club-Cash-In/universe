@@ -41,6 +41,11 @@ export const partnerMembers = pgTable(
 		sellerId: uuid("seller_id").references(() => vehicleVendors.id, {
 			onDelete: "restrict",
 		}),
+		// NULL = membresía activa. Con fecha, el alcance del tracker la ignora.
+		desactivadoAt: timestamp("desactivado_at"),
+		desactivadoPor: text("desactivado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 	},
 	(table) => [

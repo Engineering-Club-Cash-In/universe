@@ -66,12 +66,26 @@ async function reemplazarAgencias(
 		throw new ORPCError("BAD_REQUEST", { message: error });
 	}
 
+	// Las agencias que se mantienen conservan su desactivación: si no, editar
+	// agencias reactivaría sin querer a quien un gerente desactivó.
+	const actuales = await tx
+		.select({
+			companyId: partnerMembers.companyId,
+			desactivadoAt: partnerMembers.desactivadoAt,
+			desactivadoPor: partnerMembers.desactivadoPor,
+		})
+		.from(partnerMembers)
+		.where(eq(partnerMembers.userId, userId));
+	const desactivacion = new Map(actuales.map((a) => [a.companyId, a]));
+
 	await tx.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
 	await tx.insert(partnerMembers).values(
 		membresias.map((m) => ({
 			userId,
 			companyId: m.companyId,
 			sellerId: m.sellerId,
+			desactivadoAt: desactivacion.get(m.companyId)?.desactivadoAt ?? null,
+			desactivadoPor: desactivacion.get(m.companyId)?.desactivadoPor ?? null,
 		})),
 	);
 }
@@ -142,6 +156,7 @@ export const adminRouter = {
 				agencia: companies.name,
 				sellerId: partnerMembers.sellerId,
 				vendedor: vehicleVendors.name,
+				desactivadoAt: partnerMembers.desactivadoAt,
 			})
 			.from(partnerMembers)
 			.innerJoin(companies, eq(companies.id, partnerMembers.companyId))
@@ -154,6 +169,7 @@ export const adminRouter = {
 				nombre: string;
 				sellerId: string | null;
 				vendedor: string | null;
+				activa: boolean;
 			}[]
 		>();
 		for (const m of membresias) {
@@ -163,6 +179,7 @@ export const adminRouter = {
 				nombre: m.agencia.trim(),
 				sellerId: m.sellerId,
 				vendedor: m.vendedor?.trim() || null,
+				activa: m.desactivadoAt === null,
 			});
 			agenciasPorUsuario.set(m.userId, lista);
 		}

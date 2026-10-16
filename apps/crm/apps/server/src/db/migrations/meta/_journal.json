@@ -344,6 +344,13 @@
 			"when": 1791562000000,
 			"tag": "0054_close_quotation_fk_no_action",
 			"breakpoints": true
+		},
+		{
+			"idx": 48,
+			"version": "7",
+			"when": 1791562100000,
+			"tag": "0055_partner_members_desactivacion",
+			"breakpoints": true
 		}
 	]
 }

@@ -96,7 +96,7 @@ export function normalizarMotivoRiesgo(texto: string): string {
 const VERBO_DETECCION_NEGADO =
 	/(?:detect(?:a|an|o|aron|ado|ada|ados|adas)|encuentr(?:a|an)|encontr(?:o|aron|ado|ada|ados|adas)|identific(?:a|an|o|aron|ado|ada|ados|adas)|confirm(?:a|an|o|aron|ado|ada|ados|adas)|comprueb(?:a|an)|comprob(?:o|aron|ado|ada|ados|adas)|evidenci(?:a|an|o|aron|ado|ada|ados|adas)|observ(?:a|an|o|aron|ado|ada|ados|adas)|registr(?:a|an|o|aron|ado|ada|ados|adas)|report(?:a|an|o|aron|ado|ada|ados|adas)|present(?:a|o|an|aron|ado|ada|ados|adas)|cuenta\s+con|comet(?:e|en|io|ieron|ido)|adeud(?:a|an|aba|aban|o)|pose(?:e|en|ia|ian)|mantien(?:e|en)|manten(?:ia|ian)|tiene|existe(?:n)?|existia(?:n)?|existio|existieron|debe|deben|debia|debian|hay|hubo)/;
 const VERBO_ESTADO_NEGADO = new RegExp(
-	`(?:es|era|eran|son|fue|fueron|esta|estaba|estaban|estuvo|tiene|tenia|tenian|tuvo|habia|habian|existia|existian|presentaba|presentaban|registraba|registraban|reportaba|reportaban|cuenta\\s+con|(?:ha|han|habia|habian)\\s+(?:sido|habido|tenido|cometido|detectado|encontrado|identificado|confirmado|comprobado|evidenciado|observado|registrado|reportado|presentado)|${VERBO_DETECCION_NEGADO.source})`,
+	`(?:es|era|eran|son|fue|fueron|esta|estaba|estaban|estuvo|tiene|tenia|tenian|tuvo|habia|habian|existia|existian|presentaba|presentaban|registraba|registraban|reportaba|reportaban|cuenta\\s+con|contaba\\s+con|(?:ha|han|habia|habian)\\s+(?:sido|habido|tenido|cometido|detectado|encontrado|identificado|confirmado|comprobado|evidenciado|observado|registrado|reportado|presentado)|${VERBO_DETECCION_NEGADO.source})`,
 );
 // Acepta un artículo y un sujeto antes del término: "no se detectó el fraude", "no era un cliente moroso".
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
@@ -114,7 +114,7 @@ const TERMINO_EVIDENCIA_NEGADA =
 const CALIFICADOR_EVIDENCIA_NEGADA =
 	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?)?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_DETECCION_NEGADO.source}\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+(?:ni|y|o)\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?)?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source}\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+(?:ni|y|o)\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
 );
 const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;

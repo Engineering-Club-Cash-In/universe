@@ -184,19 +184,13 @@ async function cargarSemillas(ctx: ContextoCaso): Promise<Semillas> {
 	});
 }
 
-/** Tope de filas por consulta (titulares / codeudores). */
-const LIMITE_FILAS = 200;
-
-/**
- * La fila coincide por teléfono. Se selecciona y se ordena por ella ANTES del
- * límite: un nombre común puede traer cientos de homónimos y, sin orden, el
- * límite podía dejar fuera un crédito que sí coincide por teléfono.
+/*
+ * Las consultas de personas NO llevan tope: cualquier corte antes de
+ * autorizar puede dejar fuera justo el crédito que el usuario sí puede abrir.
+ * El volumen ya viene acotado por la propia búsqueda: nombre completo exacto
+ * (2+ palabras) o teléfono exacto, entre personas con crédito. En los datos,
+ * el máximo es ~5 personas por nombre y ~4 por teléfono.
  */
-function porTelefono(columna: unknown, telefonos: string[]) {
-	return sql<boolean>`(${filtroTelefonos(columna, telefonos)})`.as(
-		"por_telefono",
-	);
-}
 
 type CreditoResuelto = CreditoCanonico & {
 	titularNombre: string;
@@ -376,7 +370,6 @@ async function buscarFilas(
 				id: leads.id,
 				nombre: nombreLeadSql,
 				phone: leads.phone,
-				porTelefono: porTelefono(leads.phone, telefonos),
 			})
 			.from(leads)
 			.where(
@@ -385,24 +378,21 @@ async function buscarFilas(
 						filtroTelefonos(leads.phone, telefonos),
 						filtroNombres(nombreLeadSql, nombres),
 					),
-					// Solo personas con algún crédito, para que los homónimos sin
-					// crédito no ocupen el tope. `IN (… UNION …)` y no dos EXISTS:
-					// así Postgres arma el conjunto una vez (~30 ms contra ~180 ms).
+					// Solo personas con algún crédito. `IN (… UNION …)` y no dos
+					// EXISTS: así Postgres arma el conjunto una vez (~30 ms contra
+					// ~180 ms).
 					sql`${leads.id} IN (
 						SELECT lead_id FROM opportunities WHERE status IN ('won', 'migrate')
 						UNION
 						SELECT lead_id FROM clients
 					)`,
 				),
-			)
-			.orderBy(sql`por_telefono DESC`)
-			.limit(LIMITE_FILAS),
+			),
 		db
 			.selectDistinct({
 				opportunityId: coDebtors.opportunityId,
 				nombre: coDebtors.fullName,
 				telefonos: telefonosCodeudorSql,
-				porTelefono: porTelefono(telefonosCodeudorSql, telefonos),
 			})
 			.from(coDebtors)
 			// Su solicitud (única por oportunidad + persona): ahí puede estar el
@@ -420,9 +410,7 @@ async function buscarFilas(
 					filtroTelefonos(telefonosCodeudorSql, telefonos),
 					filtroNombres(sql`${coDebtors.fullName}`, nombres),
 				),
-			)
-			.orderBy(sql`por_telefono DESC`)
-			.limit(LIMITE_FILAS),
+			),
 		// Titulares cuyo número está solo en el móvil de su solicitud.
 		telefonos.length > 0
 			? db
@@ -440,7 +428,6 @@ async function buscarFilas(
 							filtroTelefonos(creditApplications.telMovil, telefonos),
 						),
 					)
-					.limit(LIMITE_FILAS)
 			: Promise.resolve([]),
 	]);
 
@@ -575,8 +562,8 @@ export async function buscarCreditosRelacionados(params: {
 }): Promise<CreditoRelacionado[]> {
 	// Sin tope antes de autorizar: cualquier corte previo puede dejar fuera
 	// un homónimo que el usuario sí puede abrir. Los candidatos ya vienen
-	// acotados por el tope de filas de cada consulta, y el dueño en cartera se
-	// pide por lote.
+	// acotados por la propia búsqueda (ver `buscarFilas`) y el dueño en
+	// cartera se pide por lote.
 	const base = await buscarCreditosRelacionadosBase(params.ctx);
 	if (base.length === 0) return [];
 	const sifcos = base.map((c) => c.numeroSifco);

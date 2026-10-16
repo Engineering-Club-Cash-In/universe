@@ -115,3 +115,9 @@ Check:
 - `nexa-server` logs show review `APPROVED` sent to Nexa UAT.
 
 Use a new reference for each re-test unless you intentionally want to validate duplicate/idempotent behavior.
+
+## Tokens reales: lista blanca y lotes
+
+- `bun run tokens:sync-cartera --creditos 249,299,973,763,8846 --dry-run` informa qué registraría en cartera (id, crédito, últimos 4 del token, descripción) sin llamarla. Sin `--dry-run` registra de verdad. Sin `--creditos` ni `--todos` el script se niega a correr; `--todos` registra todos los activos (incluidos los de prueba).
+- `bun run tokens:crear-lote --archivo lote.json` es un ensayo: valida el JSON `[{ "creditoId": 1, "description": "...", "nationalId": "<CUI 13 dígitos>" }]` y muestra qué crearía. Con `--limite 1 --aplicar` crea solo el primero; con `--aplicar` crea todos y se detiene en el primer resultado que no sea CREATED/UPDATED/UNCHANGED. Requiere `NEXA_SERVER_URL` y `NEXA_ADMIN_API_KEY`.
+- Retomar un lote detenido es seguro (el endpoint es idempotente por crédito). Si cartera quedó en `PENDING` o `REJECTED`, el token ya existe en nexa-server: repararlo con `tokens:sync-cartera --creditos <id>`.

@@ -5668,15 +5668,14 @@ export const cobrosRouter = {
 							const montoAplicado = Number(fila.monto_aplicado ?? 0);
 
 							// Lo aplicado a la CUOTA contractual (capital + interés + IVA +
-							// seguro + GPS + membresías), como `sumarAplicadoACuota` de
-							// cartera-back. `monto_aplicado` no sirve: en un pago legacy de
-							// solo mora/otros incluye esos rubros. Cuentan los pagos no
-							// anulados `validated`/`pending` y los `no_required` con plata
-							// real en los rubros (un legacy como el del crédito 890; las
-							// semillas de SIFCO traen los rubros en 0 y aportan 0). Un abono
-							// directo a capital (`capital`) no paga la cuota. En los
-							// `validated`/`pending`, si los rubros dan 0 (el pago se aplicó
-							// sin repartirlos) se usa `monto_aplicado` menos mora y otros.
+							// seguro + GPS + membresías): la misma suma que
+							// `sumarAplicadoACuota` de cartera-back. `monto_aplicado` no sirve
+							// porque un pago legacy lo carga con mora, otros o convenio.
+							// Cuentan los pagos no anulados `validated`/`pending` y los
+							// `no_required` con plata real en los rubros (un legacy como el
+							// del crédito 890; las semillas de SIFCO traen los rubros en 0 y
+							// aportan 0). Un abono directo a capital (`capital`) no paga la
+							// cuota.
 							const estadoPago = fila.validationStatus;
 							const pagoVivo =
 								(estadoPago === "validated" ||
@@ -5693,18 +5692,7 @@ export const cobrosRouter = {
 									fila.membresias_pago,
 								].reduce((suma, r) => suma + Number(r ?? 0), 0) * 100,
 							);
-							const montoAplicadoCuota = !pagoVivo
-								? 0
-								: rubrosCuota > 0
-									? rubrosCuota / 100
-									: estadoPago === "no_required"
-										? 0
-										: Math.max(
-												montoAplicado -
-													Number(fila.pago_mora ?? 0) -
-													(Number(fila.pago_otros) || 0),
-												0,
-											);
+							const montoAplicadoCuota = pagoVivo ? rubrosCuota / 100 : 0;
 							// Cada pago se cuenta una vez (puede venir en dos listas).
 							if (!pagosContados.has(fila.pago_id)) {
 								pagosContados.add(fila.pago_id);

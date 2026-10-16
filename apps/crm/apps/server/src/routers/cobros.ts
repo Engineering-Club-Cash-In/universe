@@ -5656,20 +5656,17 @@ export const cobrosRouter = {
 						// veían como uno. Se filtran los recibos pre-sembrados (filas de
 						// pago sin monto): existen para cobrar después, no son abonos.
 						const pagosPorCuota = new Map<number, any[]>();
+						// Lo aplicado a la CUOTA por cada pago, sumado por cuota. Va aparte
+						// de `pagosPorCuota`: un pago legacy puede traer la plata solo en
+						// los rubros, con boleta y monto aplicado en 0, y no por eso debe
+						// salir como un pago más en la lista visible.
+						const abonadoPorCuota = new Map<number, number>();
+						const pagosContados = new Set<number>();
 						for (const fila of cuotasCombinadas) {
 							if (!fila.pago_id) continue;
 							const montoBoleta = Number(fila.monto_boleta ?? 0);
 							const montoAplicado = Number(fila.monto_aplicado ?? 0);
-							if (montoBoleta <= 0 && montoAplicado <= 0) continue;
 
-							const lista = pagosPorCuota.get(fila.numero_cuota) ?? [];
-							// La misma cuota puede venir en dos listas (atrasada Y
-							// pendiente): el pago se cuenta una vez.
-							if (lista.some((pago) => pago.pagoId === fila.pago_id)) continue;
-
-							const pagoCompleto = Boolean(
-								fila.pago_pagado ?? fila.pago_cuota_completa,
-							);
 							// Lo aplicado a la CUOTA contractual (capital + interés + IVA +
 							// seguro + GPS + membresías), como `sumarAplicadoACuota` de
 							// cartera-back. `monto_aplicado` no sirve: en un pago legacy de
@@ -5708,11 +5705,33 @@ export const cobrosRouter = {
 													(Number(fila.pago_otros) || 0),
 												0,
 											);
+							// Cada pago se cuenta una vez (puede venir en dos listas).
+							if (!pagosContados.has(fila.pago_id)) {
+								pagosContados.add(fila.pago_id);
+								abonadoPorCuota.set(
+									fila.numero_cuota,
+									Math.round(
+										((abonadoPorCuota.get(fila.numero_cuota) ?? 0) +
+											montoAplicadoCuota) *
+											100,
+									) / 100,
+								);
+							}
+
+							if (montoBoleta <= 0 && montoAplicado <= 0) continue;
+
+							const lista = pagosPorCuota.get(fila.numero_cuota) ?? [];
+							// La misma cuota puede venir en dos listas (atrasada Y
+							// pendiente): el pago se cuenta una vez.
+							if (lista.some((pago) => pago.pagoId === fila.pago_id)) continue;
+
+							const pagoCompleto = Boolean(
+								fila.pago_pagado ?? fila.pago_cuota_completa,
+							);
 							lista.push({
 								pagoId: fila.pago_id,
 								montoBoleta: fila.monto_boleta ?? null,
 								montoAplicado: fila.monto_aplicado ?? null,
-								montoAplicadoCuota,
 								fechaPago: fila.fecha_pago ?? null,
 								// Estado de contabilidad del pago ("pending" = sin validar).
 								validationStatus: fila.validationStatus ?? null,
@@ -5794,6 +5813,8 @@ export const cobrosRouter = {
 											? "en_validacion"
 											: "pendiente",
 									pagos: pagosPorCuota.get(cuota.numero_cuota) ?? [],
+									// Lo ya abonado a la cuota contractual (sin mora/otros).
+									abonadoCuota: abonadoPorCuota.get(cuota.numero_cuota) ?? 0,
 									diasMora: desglose?.dias_atraso ?? 0,
 									moraGenerada: desglose ? Number(desglose.generado) : 0,
 									moraAbonada: desglose ? Number(desglose.abonado) : 0,

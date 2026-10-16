@@ -1108,13 +1108,7 @@ function cuotaDelPlan(
 			? Number(cuota.moraPendiente)
 			: Number(cuota.montoMora);
 	const tieneMora = moraMostrada > 0;
-	const abonado = esPagada
-		? 0
-		: (cuota.pagos ?? []).reduce(
-				(suma, pago) =>
-					suma + Number(pago.montoAplicadoCuota ?? pago.montoAplicado ?? 0),
-				0,
-			);
+	const abonado = esPagada ? 0 : Number(cuota.abonadoCuota ?? 0);
 	const saldoCuota = Math.max(Number(cuota.montoCuota) - abonado, 0);
 	const estado: EstadoCuota = esPagada
 		? "pagada"

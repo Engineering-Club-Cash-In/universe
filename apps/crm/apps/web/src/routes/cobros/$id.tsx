@@ -3993,16 +3993,7 @@ function RouteComponent() {
 												const pagoConMora = esPagada && tieneMora;
 												const abonado = esPagada
 													? 0
-													: (cuota.pagos ?? []).reduce(
-															(suma: number, pago: any) =>
-																suma +
-																Number(
-																	pago.montoAplicadoCuota ??
-																		pago.montoAplicado ??
-																		0,
-																),
-															0,
-														);
+													: Number(cuota.abonadoCuota ?? 0);
 												const saldoCuota = Math.max(
 													Number(cuota.montoCuota) - abonado,
 													0,

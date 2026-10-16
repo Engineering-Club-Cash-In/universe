@@ -135,6 +135,7 @@ async function cargarSemillas(ctx: ContextoCaso): Promise<Semillas> {
 						conyugeTelMovil: creditApplications.conyugeTelMovil,
 						conyugeTelOficina: creditApplications.conyugeTelOficina,
 						telEmergencia: creditApplications.telEmergencia,
+						telMovil: creditApplications.telMovil,
 					})
 					.from(creditApplications)
 					.where(
@@ -163,7 +164,13 @@ async function cargarSemillas(ctx: ContextoCaso): Promise<Semillas> {
 	return armarSemillas({
 		titular: {
 			nombre: (lead?.nombre as string | undefined) ?? null,
-			telefonos: [lead?.phone ?? null],
+			// El del lead y el móvil de su solicitud (el mismo que usa
+			// `consultaCelularSolicitudTitular`): hay titulares con un número
+			// solo en la solicitud.
+			telefonos: [
+				lead?.phone ?? null,
+				...solicitudesTitular.map((s) => s.telMovil),
+			],
 		},
 		codeudores: (codeudores ?? []).map((c) => ({
 			nombre: c.nombre,
@@ -306,6 +313,50 @@ export async function resolverCreditos(
 }
 
 /**
+ * Oportunidad → SIFCOs donde vive: su propio `numero_sifco` y el de los casos
+ * cuyo contrato apunta a ella (un crédito financiado puede tener el SIFCO solo
+ * en el caso). `resolverCreditos` carga esas oportunidades por id, así que la
+ * búsqueda tiene que llegar a ellas por el mismo camino.
+ */
+async function sifcosDeOportunidades(
+	ids: (string | null)[],
+): Promise<Map<string, string[]>> {
+	const unicos = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+	const sifcos = new Map<string, string[]>();
+	if (unicos.length === 0) return sifcos;
+	const [propios, porContrato] = await Promise.all([
+		db
+			.select({ id: opportunities.id, sifco: opportunities.numeroSifco })
+			.from(opportunities)
+			.where(
+				and(
+					inArray(opportunities.id, unicos),
+					isNotNull(opportunities.numeroSifco),
+				),
+			),
+		db
+			.select({
+				id: clients.opportunityId,
+				sifco: casosCobros.numeroCreditoSifco,
+			})
+			.from(casosCobros)
+			.innerJoin(
+				contratosFinanciamiento,
+				eq(contratosFinanciamiento.id, casosCobros.contratoId),
+			)
+			.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+			.where(inArray(clients.opportunityId, unicos)),
+	]);
+	for (const f of [...propios, ...porContrato]) {
+		if (!f.id || !f.sifco) continue;
+		const lista = sifcos.get(f.id) ?? [];
+		if (!lista.includes(f.sifco)) lista.push(f.sifco);
+		sifcos.set(f.id, lista);
+	}
+	return sifcos;
+}
+
+/**
  * Busca PERSONAS que coinciden (leads y codeudores) y después los créditos
  * de los que de verdad son titular o codeudor, resueltos con
  * `resolverCreditos`. Así una fila vieja (otra oportunidad con el mismo
@@ -318,7 +369,7 @@ async function buscarFilas(
 	const nombres = semillas.nombres.map((s) => s.nombre);
 	if (telefonos.length === 0 && nombres.length === 0) return [];
 
-	const [personasLead, codeudores] = await Promise.all([
+	const [personasLead, codeudores, solicitudesTitular] = await Promise.all([
 		db
 			.select({
 				id: leads.id,
@@ -337,7 +388,7 @@ async function buscarFilas(
 					// crédito no ocupen el tope. `IN (… UNION …)` y no dos EXISTS:
 					// así Postgres arma el conjunto una vez (~30 ms contra ~180 ms).
 					sql`${leads.id} IN (
-						SELECT lead_id FROM opportunities WHERE numero_sifco IS NOT NULL
+						SELECT lead_id FROM opportunities WHERE status IN ('won', 'migrate')
 						UNION
 						SELECT lead_id FROM clients
 					)`,
@@ -348,13 +399,11 @@ async function buscarFilas(
 		db
 			.selectDistinct({
 				opportunityId: coDebtors.opportunityId,
-				sifco: opportunities.numeroSifco,
 				nombre: coDebtors.fullName,
 				telefonos: telefonosCodeudorSql,
 				porTelefono: porTelefono(telefonosCodeudorSql, telefonos),
 			})
 			.from(coDebtors)
-			.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
 			// Su solicitud (única por oportunidad + persona): ahí puede estar el
 			// único número del codeudor, igual que en `cargarCodeudores`.
 			.leftJoin(
@@ -366,33 +415,44 @@ async function buscarFilas(
 				),
 			)
 			.where(
-				and(
-					isNotNull(opportunities.numeroSifco),
-					or(
-						filtroTelefonos(telefonosCodeudorSql, telefonos),
-						filtroNombres(sql`${coDebtors.fullName}`, nombres),
-					),
+				or(
+					filtroTelefonos(telefonosCodeudorSql, telefonos),
+					filtroNombres(sql`${coDebtors.fullName}`, nombres),
 				),
 			)
 			.orderBy(sql`por_telefono DESC`)
 			.limit(LIMITE_FILAS),
+		// Titulares cuyo número está solo en el móvil de su solicitud.
+		telefonos.length > 0
+			? db
+					.selectDistinct({
+						opportunityId: creditApplications.opportunityId,
+						telMovil: creditApplications.telMovil,
+					})
+					.from(creditApplications)
+					.where(
+						and(
+							or(
+								eq(creditApplications.personType, "lead"),
+								isNull(creditApplications.personType),
+							),
+							filtroTelefonos(creditApplications.telMovil, telefonos),
+						),
+					)
+					.limit(LIMITE_FILAS)
+			: Promise.resolve([]),
 	]);
 
-	// SIFCOs donde esos leads pueden ser titulares: por su oportunidad o por el
-	// cliente de un contrato. Cuál es el titular real lo decide `resolverCreditos`.
+	// SIFCOs donde esas personas pueden estar. Quién es el titular o codeudor
+	// real de cada uno lo decide `resolverCreditos`.
 	const idsLead = personasLead.map((p) => p.id);
-	const [porOportunidad, porContrato] =
+	const [oppsDeLeads, sifcosPorContratoDeLead] =
 		idsLead.length > 0
 			? await Promise.all([
 					db
-						.select({ sifco: opportunities.numeroSifco })
+						.select({ id: opportunities.id })
 						.from(opportunities)
-						.where(
-							and(
-								inArray(opportunities.leadId, idsLead),
-								isNotNull(opportunities.numeroSifco),
-							),
-						),
+						.where(inArray(opportunities.leadId, idsLead)),
 					db
 						.select({ sifco: casosCobros.numeroCreditoSifco })
 						.from(casosCobros)
@@ -407,11 +467,15 @@ async function buscarFilas(
 						.where(inArray(clients.leadId, idsLead)),
 				])
 			: [[], []];
+	const sifcosPorOpp = await sifcosDeOportunidades([
+		...oppsDeLeads.map((o) => o.id),
+		...codeudores.map((c) => c.opportunityId),
+		...solicitudesTitular.map((s) => s.opportunityId),
+	]);
 
 	const creditos = await resolverCreditos([
-		...porOportunidad.map((f) => f.sifco ?? ""),
-		...porContrato.map((f) => f.sifco ?? ""),
-		...codeudores.map((f) => f.sifco ?? ""),
+		...[...sifcosPorOpp.values()].flat(),
+		...sifcosPorContratoDeLead.map((f) => f.sifco ?? ""),
 	]);
 	const vigente = (c: CreditoResuelto | undefined): c is CreditoResuelto =>
 		Boolean(c && ESTADOS_CON_CREDITO.some((e) => e === c.status));
@@ -432,17 +496,35 @@ async function buscarFilas(
 		});
 	}
 	for (const cd of codeudores) {
-		const c = creditos.get(cd.sifco ?? "");
-		// Solo si es codeudor de la oportunidad vigente del SIFCO.
-		if (!vigente(c) || c.opportunityId !== cd.opportunityId) continue;
-		filas.push({
-			numeroSifco: cd.sifco ?? "",
-			rol: "codeudor",
-			personaNombre: limpiarNombre(cd.nombre),
-			personaTelefono: cd.telefonos,
-			titularNombre: c.titularNombre,
-			vehiculo: c.vehiculo,
-		});
+		for (const sifco of sifcosPorOpp.get(cd.opportunityId) ?? []) {
+			const c = creditos.get(sifco);
+			// Solo si es codeudor de la oportunidad vigente del SIFCO.
+			if (!vigente(c) || c.opportunityId !== cd.opportunityId) continue;
+			filas.push({
+				numeroSifco: sifco,
+				rol: "codeudor",
+				personaNombre: limpiarNombre(cd.nombre),
+				personaTelefono: cd.telefonos,
+				titularNombre: c.titularNombre,
+				vehiculo: c.vehiculo,
+			});
+		}
+	}
+	for (const sol of solicitudesTitular) {
+		if (!sol.opportunityId) continue;
+		for (const sifco of sifcosPorOpp.get(sol.opportunityId) ?? []) {
+			const c = creditos.get(sifco);
+			// Solo la solicitud del titular de la oportunidad vigente.
+			if (!vigente(c) || c.opportunityId !== sol.opportunityId) continue;
+			filas.push({
+				numeroSifco: sifco,
+				rol: "titular",
+				personaNombre: c.titularNombre,
+				personaTelefono: sol.telMovil,
+				titularNombre: c.titularNombre,
+				vehiculo: c.vehiculo,
+			});
+		}
 	}
 	return filas;
 }

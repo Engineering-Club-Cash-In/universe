@@ -3507,7 +3507,18 @@ export interface FacturarGenericoItem {
   rubro_desglose?: string;
 }
 
-export type EmisorKey = "CUBE" | "SE_PRESTA" | "AMJK" | "CREACION_IMAGEN" | "GRUPO_BATRO" | "AUTOCASH";
+// La lista sale del back (GET /api/dte/emisores).
+export type EmisorKey = string;
+
+export interface EmisorOpcion {
+  clave: EmisorKey;
+  nombre: string;
+}
+
+export const obtenerEmisores = async (): Promise<EmisorOpcion[]> => {
+  const response = await api.get('/api/dte/emisores');
+  return response.data.data;
+};
 
 export interface FacturarGenericoRequest {
   nit: string;

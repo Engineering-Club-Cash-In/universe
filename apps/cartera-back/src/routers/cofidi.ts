@@ -40,7 +40,7 @@ import {
   SAT_CONFIG,
   getInversionistaFacturadorConfig,
 } from "../utils/functions/const";
-import { EMISORES, emisorPorClave } from "../cofidi/emisores";
+import { EMISORES, emisorPorClave, emisoresParaSelector } from "../cofidi/emisores";
 
 type FacturadorConfig = Pick<DTERequest, "emisor" | "tipoDocumento" | "codigoMoneda" | "frases">;
 type FacturarGenericoItem = {
@@ -3423,6 +3423,11 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
       }),
     }
   )
+
+  // ============================================
+  // 🏢 GET - Emisores para el selector de Facturas Genéricas
+  // ============================================
+  .get("/emisores", () => ({ success: true, data: emisoresParaSelector() }))
 
   // ============================================
   // 🔥 POST - Facturar Genérico (sin pago asociado)

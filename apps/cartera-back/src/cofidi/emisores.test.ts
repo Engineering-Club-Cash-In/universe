@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { EMISORES, emisorPorClave, emisorPorNit } from "./emisores";
+import { EMISORES, emisorPorClave, emisorPorNit, emisoresParaSelector } from "./emisores";
 import {
   AMJK_CONFIG,
   AMJK_SAT_CONFIG,
@@ -129,6 +129,20 @@ describe("emisorPorClave", () => {
   it('emisorPorClave("CUBE") devuelve la entrada CUBE', () => {
     const emisor = emisorPorClave("CUBE");
     expect(emisor?.clave).toBe("CUBE");
+  });
+});
+
+describe("emisoresParaSelector", () => {
+  it("devuelve exactamente [CUBE, Se Presta, AMJK, Creación Imagen, Grupo Batro, AutoCash]", () => {
+    const resultado = emisoresParaSelector();
+    expect(resultado).toEqual([
+      { clave: "CUBE", nombre: "CUBE" },
+      { clave: "SE_PRESTA", nombre: "Se Presta" },
+      { clave: "AMJK", nombre: "AMJK" },
+      { clave: "CREACION_IMAGEN", nombre: "Creación Imagen" },
+      { clave: "GRUPO_BATRO", nombre: "Grupo Batro" },
+      { clave: "AUTOCASH", nombre: "AutoCash" },
+    ]);
   });
 });
 

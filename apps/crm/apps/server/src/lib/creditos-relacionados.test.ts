@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	armarSemillas,
 	consolidarCreditosRelacionados,
+	elegirOportunidadesCanonicas,
 	type FilaPersonaEnCredito,
 	normalizarNombre,
 } from "./creditos-relacionados";
@@ -216,5 +217,66 @@ describe("consolidarCreditosRelacionados", () => {
 			rolAqui: "titular",
 			rolAlla: "codeudor",
 		});
+	});
+});
+
+describe("elegirOportunidadesCanonicas", () => {
+	const viejo = new Date("2026-01-01");
+	const nuevo = new Date("2026-06-01");
+
+	it("el contrato del caso activo le gana a un caso inactivo más nuevo", () => {
+		const r = elegirOportunidadesCanonicas({
+			casos: [
+				{
+					numeroCreditoSifco: "1",
+					activo: false,
+					updatedAt: nuevo,
+					opportunityId: "opp-obsoleta",
+				},
+				{
+					numeroCreditoSifco: "1",
+					activo: true,
+					updatedAt: viejo,
+					opportunityId: "opp-vigente",
+				},
+			],
+			oportunidades: [{ sifco: "1", id: "opp-reciente" }],
+		});
+		expect(r.get("1")).toBe("opp-vigente");
+	});
+
+	it("si el caso vigente no tiene contrato no se usa el de un caso inactivo", () => {
+		const r = elegirOportunidadesCanonicas({
+			casos: [
+				{
+					numeroCreditoSifco: "1",
+					activo: false,
+					updatedAt: nuevo,
+					opportunityId: "opp-obsoleta",
+				},
+				{
+					numeroCreditoSifco: "1",
+					activo: true,
+					updatedAt: viejo,
+					opportunityId: null,
+				},
+			],
+			oportunidades: [
+				{ sifco: "1", id: "opp-ganada-reciente" },
+				{ sifco: "1", id: "opp-otra" },
+			],
+		});
+		expect(r.get("1")).toBe("opp-ganada-reciente");
+	});
+
+	it("sin caso, la primera oportunidad del orden", () => {
+		const r = elegirOportunidadesCanonicas({
+			casos: [],
+			oportunidades: [
+				{ sifco: "2", id: "a" },
+				{ sifco: "2", id: "b" },
+			],
+		});
+		expect(r.get("2")).toBe("a");
 	});
 });

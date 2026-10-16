@@ -34,6 +34,7 @@ import {
 	armarSemillas,
 	type CreditoRelacionadoBase,
 	consolidarCreditosRelacionados,
+	elegirOportunidadesCanonicas,
 	type FilaPersonaEnCredito,
 	limpiarNombre,
 	type Semillas,
@@ -190,8 +191,8 @@ function porTelefono(columna: unknown, telefonos: string[]) {
 
 /**
  * SIFCO → id de su oportunidad canónica, con la misma regla que
- * `resolverContextoCaso`: la del contrato vinculado al caso si lo hay; si no,
- * la won/migrate más reciente. Un SIFCO puede repetirse en oportunidades
+ * `resolverContextoCaso` aplicada al caso vigente del SIFCO: la del contrato
+ * vinculado a ese caso si lo hay; si no, la won/migrate más reciente. Un SIFCO puede repetirse en oportunidades
  * viejas de otro lead, y una coincidencia en esa fila obsoleta no puede
  * exponer el crédito de quien realmente lo tiene.
  *
@@ -203,25 +204,23 @@ export async function oportunidadesCanonicas(
 ): Promise<Map<string, string>> {
 	const unicos = [...new Set(sifcos.filter(Boolean))];
 	if (unicos.length === 0) return new Map();
-	const [porContrato, porSifco] = await Promise.all([
+	const [casos, porSifco] = await Promise.all([
+		// Todos los casos del SIFCO (con o sin contrato): primero se elige el
+		// caso vigente y recién después se mira su contrato.
 		db
 			.select({
-				sifco: casosCobros.numeroCreditoSifco,
-				id: clients.opportunityId,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				activo: casosCobros.activo,
+				updatedAt: casosCobros.updatedAt,
+				opportunityId: clients.opportunityId,
 			})
 			.from(casosCobros)
-			.innerJoin(
+			.leftJoin(
 				contratosFinanciamiento,
 				eq(contratosFinanciamiento.id, casosCobros.contratoId),
 			)
-			.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
-			.where(
-				and(
-					inArray(casosCobros.numeroCreditoSifco, unicos),
-					isNotNull(clients.opportunityId),
-				),
-			)
-			.orderBy(desc(casosCobros.createdAt)),
+			.leftJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+			.where(inArray(casosCobros.numeroCreditoSifco, unicos)),
 		db
 			.select({ sifco: opportunities.numeroSifco, id: opportunities.id })
 			.from(opportunities)
@@ -231,14 +230,7 @@ export async function oportunidadesCanonicas(
 				desc(opportunities.createdAt),
 			),
 	]);
-	const canonicas = new Map<string, string>();
-	// El contrato manda; después, la primera según el orden de arriba.
-	for (const f of [...porContrato, ...porSifco]) {
-		if (f.sifco && f.id && !canonicas.has(f.sifco)) {
-			canonicas.set(f.sifco, f.id);
-		}
-	}
-	return canonicas;
+	return elegirOportunidadesCanonicas({ casos, oportunidades: porSifco });
 }
 
 async function buscarFilas(

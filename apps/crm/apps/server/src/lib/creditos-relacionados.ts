@@ -12,6 +12,7 @@
  */
 
 import { extraerTelefonos } from "./bot-cobros/telefonos";
+import { ganaComoCasoVigente } from "./caso-vigente";
 
 /** Tope de créditos que se devuelven a la ficha. */
 export const LIMITE_CREDITOS_RELACIONADOS = 20;
@@ -266,4 +267,38 @@ export function consolidarCreditosRelacionados(params: {
 				a.numeroSifco.localeCompare(b.numeroSifco),
 		)
 		.slice(0, LIMITE_CREDITOS_RELACIONADOS);
+}
+
+/**
+ * Elige la oportunidad canónica de cada SIFCO (ver `oportunidadesCanonicas`
+ * en el servicio): la del contrato del caso VIGENTE (el activo y, a igualdad,
+ * el más reciente, como `caso-vigente.ts`); si ese caso no tiene contrato, la
+ * primera de `oportunidades`, que ya viene ordenada won/migrate y más
+ * reciente primero. Un caso inactivo más nuevo no impone su contrato.
+ */
+export function elegirOportunidadesCanonicas(params: {
+	casos: {
+		numeroCreditoSifco: string | null;
+		activo: boolean | null;
+		updatedAt: Date | null;
+		/** De `clients` vía el contrato del caso; null sin contrato. */
+		opportunityId: string | null;
+	}[];
+	oportunidades: { sifco: string | null; id: string }[];
+}): Map<string, string> {
+	const vigentes = new Map<string, (typeof params.casos)[number]>();
+	for (const caso of params.casos) {
+		const sifco = caso.numeroCreditoSifco;
+		if (sifco && ganaComoCasoVigente(caso, vigentes.get(sifco))) {
+			vigentes.set(sifco, caso);
+		}
+	}
+	const canonicas = new Map<string, string>();
+	for (const [sifco, caso] of vigentes) {
+		if (caso.opportunityId) canonicas.set(sifco, caso.opportunityId);
+	}
+	for (const o of params.oportunidades) {
+		if (o.sifco && !canonicas.has(o.sifco)) canonicas.set(o.sifco, o.id);
+	}
+	return canonicas;
 }

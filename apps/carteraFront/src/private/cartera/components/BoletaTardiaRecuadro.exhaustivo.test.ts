@@ -452,7 +452,7 @@ describe("componente BoletaTardiaRecuadro (se invoca como función, sin DOM)", (
     }
   });
   test("razones que no son 'gris' (sin_mora, fuera_de_ventana, …) → oculto", () => {
-    for (const razon of ["estado_no_aplica", "sin_mora", "fuera_de_ventana", "fuera_de_tope", "boleta_invalida", "boleta_de_otro_periodo", "credito_no_encontrado"] as const)
+    for (const razon of ["estado_no_aplica", "sin_mora", "fuera_de_ventana", "boleta_invalida", "boleta_de_otro_periodo", "credito_no_encontrado"] as const)
       expect(estadoRecuadroBoletaTardia(vista({ aplica: false, razon }), entorno())).toEqual({ tipo: "oculto" });
     expect(estadoRecuadroBoletaTardia(undefined, entorno())).toEqual({ tipo: "oculto" });
   });

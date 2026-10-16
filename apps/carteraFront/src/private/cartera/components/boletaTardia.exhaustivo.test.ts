@@ -22,7 +22,7 @@ describe("cada razon del back -> que se ve", () => {
     "fuera_de_tope", "boleta_invalida", "boleta_de_otro_periodo", "credito_no_encontrado"];
   const esperado: Record<RazonBoletaTardia, "gris" | "oculto"> = {
     estado_no_aplica: "oculto", sin_mora: "oculto", fuera_de_ventana: "oculto", no_alcanza_mora: "gris", no_queda_al_dia: "gris",
-    fuera_de_tope: "oculto", boleta_invalida: "oculto", boleta_de_otro_periodo: "oculto", credito_no_encontrado: "oculto",
+    fuera_de_tope: "gris", boleta_invalida: "oculto", boleta_de_otro_periodo: "oculto", credito_no_encontrado: "oculto",
   };
   for (const r of todas) {
     test(`!aplica + ${r} -> ${esperado[r]}`, () => {

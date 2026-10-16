@@ -7,8 +7,8 @@ import { getCoveredOpenInstallment, montoBoletaSchema } from "./registerPaymentP
 import { cuotasParaPendienteDeCreditos, hoyGuatemala } from "./latefee";
 import { cobrarRubrosParaBoleta } from "./rubros";
 import {
-  cuotaConCierreDiferidoNexa, cuotasQueCalificanBoletaTardia, decidirCondonacionBoletaTardia, disponibleParaCuotas,
-  pagosPendientesVigentesNexa, saldoDeCuotaParaNexa, type RazonSinCondonacion,
+  cuotaConCierreDiferidoNexa, cuotasATiempoBoletaTardia, cuotasQueCalificanBoletaTardia, decidirCondonacionBoletaTardia, disponibleParaCuotas,
+  pagosPendientesVigentesNexa, saldoDeCuotaParaNexa, TOPE_DIAS_BOLETA_TARDIA, type RazonSinCondonacion,
 } from "../utils/condonacionNexaATiempo";
 import { fechaCalendarioGT, ymdDeFechaCalendario } from "../utils/fechaCalendarioGT";
 
@@ -23,7 +23,8 @@ export type CuotaCondonadaBoletaTardia = { cuota_id: number; numero_cuota: numbe
 export type DecisionBoletaTardiaCalculada = {
   aplica: boolean;
   razon: RazonSinCondonacion | "credito_no_encontrado" | null; // null si aplica
-  /** Vencimiento más antiguo de las cuotas condonadas (o de las que calificaban, si razón = no_queda_al_dia | no_alcanza_mora). */
+  /** Vencimiento más antiguo de las cuotas condonadas (o de las que calificaban, si razón = no_queda_al_dia | no_alcanza_mora;
+   *  o de las que eran a tiempo, si razón = fuera_de_tope). Solo para la vista: no cambia la decisión. */
   fechaVencimiento: string | null;
   fechaBoleta: string;
   fechaRegistro: string; // hoy Guatemala, YYYY-MM-DD
@@ -183,6 +184,14 @@ export async function calcularDecisionBoletaTardia(
     const calif = cuotasQueCalificanBoletaTardia({ cuotasConMora, cuotasAbiertas, fechaBoleta: entrada.fecha_boleta, hoy, vencimientoCuotaAnterior });
     const fechaVencimiento = calif.calificadas.map((c) => ymdDeFechaCalendario(c.fecha_vencimiento)).sort()[0] ?? null;
     return no(razonFinal, { fechaVencimiento, diasRetraso: fechaVencimiento ? diasEntre(fechaRegistro, fechaVencimiento) : null, moraActiva });
+  }
+  // A tiempo pero pasado el tope: se muestra la cuota a tiempo MÁS VIEJA, que es la que la boleta paga primero y la
+  // de más días de retraso (la que explica "pasaron más de 5 días"). Si por datos inconsistentes (diasAtraso ≠ días
+  // reales) no supera el tope, no hay línea de tiempo coherente que mostrar: se oculta como antes.
+  if (razonFinal === "fuera_de_tope") {
+    const fechaVencimiento = cuotasATiempoBoletaTardia(cuotasConMora, entrada.fecha_boleta).map((c) => c.fecha_vencimiento).sort()[0];
+    const diasRetraso = fechaVencimiento ? diasEntre(fechaRegistro, fechaVencimiento) : 0;
+    if (fechaVencimiento && diasRetraso > TOPE_DIAS_BOLETA_TARDIA) return no(razonFinal, { fechaVencimiento, diasRetraso, moraActiva });
   }
   return no(razonFinal, { moraActiva });
 }

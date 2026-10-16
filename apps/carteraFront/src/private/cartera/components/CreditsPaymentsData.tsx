@@ -1816,7 +1816,9 @@ function MoraInfo({
   });
 
   return (
-    <div className="bg-yellow-50 rounded-2xl p-4">
+    // whitespace-normal: en la vista de tabla esto vive dentro de un TableCell,
+    // que trae whitespace-nowrap y no dejaba hacer wrap a la nota.
+    <div className="bg-yellow-50 rounded-2xl p-4 whitespace-normal">
       <h4 className="text-lg font-extrabold text-yellow-800 mb-3 text-center">
         Detalles de Mora
       </h4>
@@ -1841,7 +1843,7 @@ function MoraInfo({
             )}
           </div>
         )}
-        <p className="col-span-2 text-xs text-gray-600 text-left leading-relaxed">
+        <p className="col-span-2 mx-auto max-w-prose px-2 text-xs text-gray-600 text-left leading-relaxed break-words">
           {tarjeta.explicacion}
         </p>
       </div>

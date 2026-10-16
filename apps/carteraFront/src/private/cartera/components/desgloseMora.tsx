@@ -11,7 +11,8 @@ const fecha = (iso: string) => {
 
 /**
  * Explica al asesor de dónde sale la mora: la regla en una línea y cada cuota
- * con sus días, lo que generó, lo ya abonado y lo que falta. Los números vienen
+ * con sus días y lo que falta (y lo generado/abonado si hubo abono). Es una
+ * lista y no una tabla: la card es angosta y 5 columnas se salían. Los números vienen
  * del back, calculados igual que el cron: acá no se recalcula nada.
  */
 export function DesgloseMoraPanel({
@@ -43,71 +44,66 @@ export function DesgloseMoraPanel({
   const hayEnValidacion = desglose.cuotas.some((c) => c.en_validacion);
 
   return (
-    <div className="mt-2">
+    <div className="mt-2 min-w-0">
       <button
         type="button"
         onClick={() => setAbierto((v) => !v)}
-        className="text-[11px] font-semibold text-red-600 underline decoration-dotted hover:text-red-700"
+        aria-expanded={abierto}
+        className="text-left text-[11px] font-semibold text-red-600 underline decoration-dotted hover:text-red-700 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
       >
         {abierto ? "Ocultar explicación" : `¿Por qué ${q(moraRegistrada)} de mora?`}
       </button>
 
       {abierto && (
-        <div className="mt-2 rounded-md border border-red-100 bg-red-50/60 p-2 text-[11px] text-gray-700 space-y-2">
-          <p>
-            Cada cuota atrasada suma <b>{q(desglose.cargoDiario)} por día</b> (capital{" "}
-            {q(capital)} × 1.12% ÷ 30), hasta un máximo de <b>{q(desglose.cargoMensual)}</b> por
-            cuota (30 días). Lo ya abonado a la mora de cada cuota (pagado o condonado) se descuenta de esa cuota.
-          </p>
+        <div className="mt-2 min-w-0 break-words rounded-md border border-red-100 bg-red-50/60 p-2 text-[11px] text-gray-700 space-y-2">
+          <div>
+            <p>
+              Cada cuota atrasada suma <b>{q(desglose.cargoDiario)} por día</b>, hasta{" "}
+              <b>{q(desglose.cargoMensual)}</b> por cuota (30 días).
+            </p>
+            <p className="text-[10px] text-gray-500">
+              capital {q(capital)} × 1.12% ÷ 30. Lo ya pagado o condonado de la mora de cada cuota se descuenta.
+            </p>
+          </div>
 
-          <table className="w-full border-separate border-spacing-x-1">
-            <thead>
-              <tr className="text-left text-[10px] uppercase text-gray-500">
-                <th className="font-semibold">Cuota</th>
-                <th className="font-semibold">Días</th>
-                <th className="font-semibold text-right whitespace-nowrap">Generó</th>
-                <th className="font-semibold text-right whitespace-nowrap">Abonado</th>
-                <th className="font-semibold text-right whitespace-nowrap">Debe</th>
-              </tr>
-            </thead>
-            <tbody>
-              {desglose.cuotas.map((c) => (
-                <tr key={c.numero_cuota} className="align-top">
-                  <td>
-                    #{c.numero_cuota}
-                    <div className="text-[10px] text-gray-500">venció {fecha(c.fecha_vencimiento)}</div>
-                    {c.en_validacion && (
-                      <div className="text-[10px] font-semibold text-amber-700">
-                        ⏳ pago sin validar hace más de 7 días: genera mora
-                      </div>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap">
-                    {c.dias_atraso}
-                    {c.topada && <div className="text-[10px] text-gray-500">tope</div>}
-                  </td>
-                  <td className="text-right whitespace-nowrap">{q(c.generado)}</td>
-                  <td className="text-right whitespace-nowrap">{Number(c.abonado) > 0 ? `−${q(c.abonado)}` : "—"}</td>
-                  <td className="text-right whitespace-nowrap font-semibold text-red-600">{q(c.pendiente)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              {Math.abs(ajuste) >= 0.01 && (
-                <tr>
-                  <td colSpan={4} className="pt-1 text-gray-500">Ajuste por redondeo</td>
-                  <td className="pt-1 text-right whitespace-nowrap text-gray-500">
-                    {ajuste > 0 ? "+" : "−"}
-                    {q(Math.abs(ajuste))}
-                  </td>
-                </tr>
-              )}
-              <tr className="border-t border-red-100">
-                <td colSpan={4} className="pt-1 font-semibold">Total calculado hoy</td>
-                <td className="pt-1 text-right font-bold text-red-700">{q(desglose.total)}</td>
-              </tr>
-            </tfoot>
-          </table>
+          <ul className="divide-y divide-red-100">
+            {desglose.cuotas.map((c) => (
+              <li key={c.numero_cuota} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 py-1">
+                <div className="min-w-0">
+                  <div className="font-semibold">Cuota #{c.numero_cuota}</div>
+                  <div className="text-[10px] text-gray-500">
+                    venció {fecha(c.fecha_vencimiento)} · {c.dias_atraso} {c.dias_atraso === 1 ? "día" : "días"}{c.topada && " (tope)"}
+                  </div>
+                  {Number(c.abonado) > 0 && (
+                    <div className="text-[10px] text-gray-500">
+                      generó {q(c.generado)} · abonado {q(c.abonado)}
+                    </div>
+                  )}
+                  {c.en_validacion && (
+                    <div className="text-[10px] font-semibold text-amber-700">
+                      ⏳ pago sin validar hace más de 7 días: genera mora
+                    </div>
+                  )}
+                </div>
+                <div className="text-right tabular-nums whitespace-nowrap font-semibold text-red-600">
+                  {q(c.pendiente)}
+                </div>
+              </li>
+            ))}
+            {Math.abs(ajuste) >= 0.01 && (
+              <li className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 py-1 text-gray-500">
+                <span className="min-w-0">Ajuste por redondeo</span>
+                <span className="text-right tabular-nums whitespace-nowrap">
+                  {ajuste > 0 ? "+" : "−"}
+                  {q(Math.abs(ajuste))}
+                </span>
+              </li>
+            )}
+          </ul>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 border-t border-red-200 pt-1">
+            <span className="min-w-0 font-semibold">Total calculado hoy</span>
+            <span className="text-right tabular-nums whitespace-nowrap font-bold text-red-700">{q(desglose.total)}</span>
+          </div>
 
           {hayEnValidacion && (
             <p className="text-amber-700">

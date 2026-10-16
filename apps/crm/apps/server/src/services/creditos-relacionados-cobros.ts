@@ -70,6 +70,15 @@ function sqlNombreNormalizado(expresion: SQL) {
 	return sql`btrim(regexp_replace(regexp_replace(normalize(lower(${expresion}), NFD), '[\\u0300-\\u036f]', '', 'g'), '\\s+', ' ', 'g'))`;
 }
 
+/**
+ * Todos los números del codeudor en un campo: el de `co_debtors` y los de su
+ * solicitud, los mismos que usa `cargarCodeudores` para las semillas. Así la
+ * búsqueda es simétrica: si A encuentra a B por el móvil de la solicitud del
+ * codeudor, B también encuentra a A. Separados por coma para que
+ * `extraerTelefonos` los parta en el match exacto.
+ */
+const telefonosCodeudorSql = sql<string>`concat_ws(',', ${coDebtors.phone}, ${creditApplications.telMovil}, ${creditApplications.telResidencia})`;
+
 const nombreLeadSql = sql`concat_ws(' ', ${leads.firstName}, ${leads.middleName}, ${leads.lastName}, ${leads.secondLastName})`;
 
 /** `col LIKE '%tel%' OR …`, o `false` si no hay teléfonos. */
@@ -203,17 +212,27 @@ async function buscarFilas(
 			.selectDistinct({
 				...columnasCredito,
 				personaNombre: coDebtors.fullName,
-				personaTelefono: coDebtors.phone,
+				personaTelefono: telefonosCodeudorSql,
 			})
 			.from(coDebtors)
 			.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
+			// Su solicitud (única por oportunidad + persona): ahí puede estar el
+			// único número del codeudor, igual que en `cargarCodeudores`.
+			.leftJoin(
+				creditApplications,
+				and(
+					eq(creditApplications.opportunityId, opportunities.id),
+					eq(creditApplications.personType, "coDebtor"),
+					eq(creditApplications.personId, coDebtors.id),
+				),
+			)
 			.leftJoin(leads, eq(leads.id, opportunities.leadId))
 			.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 			.where(
 				and(
 					base,
 					or(
-						filtroTelefonos(coDebtors.phone, telefonos),
+						filtroTelefonos(telefonosCodeudorSql, telefonos),
 						filtroNombres(sql`${coDebtors.fullName}`, nombres),
 					),
 				),

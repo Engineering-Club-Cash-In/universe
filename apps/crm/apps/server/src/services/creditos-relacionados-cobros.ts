@@ -36,6 +36,8 @@ import {
 	type CreditoRelacionadoBase,
 	consolidarCreditosRelacionados,
 	type FilaPersonaEnCredito,
+	filtrarPorAccesoYTopar,
+	LIMITE_CANDIDATOS_ACCESO,
 	limpiarNombre,
 	resolverCreditosCanonicos,
 	type Semillas,
@@ -572,7 +574,10 @@ export async function buscarCreditosRelacionados(params: {
 	userId: string;
 	userRole: string;
 }): Promise<CreditoRelacionado[]> {
-	const base = await buscarCreditosRelacionadosBase(params.ctx);
+	const base = (await buscarCreditosRelacionadosBase(params.ctx)).slice(
+		0,
+		LIMITE_CANDIDATOS_ACCESO,
+	);
 	if (base.length === 0) return [];
 	const sifcos = base.map((c) => c.numeroSifco);
 
@@ -600,17 +605,13 @@ export async function buscarCreditosRelacionados(params: {
 		new Set<string>() as Set<string> | null,
 	);
 
-	return (
-		base
-			.map((c) => ({
-				...c,
-				puedeAbrir: permitidos === null || permitidos.has(c.numeroSifco),
-				asesorNombre: duenos.get(c.numeroSifco)?.nombre ?? null,
-				estado: estados.get(c.numeroSifco) ?? null,
-			}))
-			// Un nombre igual puede ser un homónimo: no alcanza para mostrarle a
-			// alguien un crédito que no puede abrir. Solo pasa si ya tiene acceso.
-			.filter((c) => !c.soloPorNombre || c.puedeAbrir)
+	return filtrarPorAccesoYTopar(
+		base.map((c) => ({
+			...c,
+			puedeAbrir: permitidos === null || permitidos.has(c.numeroSifco),
+			asesorNombre: duenos.get(c.numeroSifco)?.nombre ?? null,
+			estado: estados.get(c.numeroSifco) ?? null,
+		})),
 	);
 }
 

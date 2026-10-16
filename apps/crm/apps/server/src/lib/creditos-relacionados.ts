@@ -17,6 +17,13 @@ import { ganaComoCasoVigente } from "./caso-vigente";
 /** Tope de créditos que se devuelven a la ficha. */
 export const LIMITE_CREDITOS_RELACIONADOS = 20;
 
+/**
+ * Tope de candidatos a los que se les revisa el acceso en cartera: los de
+ * teléfono van primero y nunca se filtran, así que alcanza para llenar la card
+ * sin consultar cartera por cientos de homónimos.
+ */
+export const LIMITE_CANDIDATOS_ACCESO = 100;
+
 /** Nombres con menos palabras no se buscan: «Juan» solo trae medio país. */
 const PALABRAS_MINIMAS_NOMBRE = 2;
 
@@ -259,14 +266,15 @@ export function consolidarCreditosRelacionados(params: {
 		credito.soloPorNombre = credito.motivos.every((m) => m.tipo === "nombre");
 	}
 
-	// Primero los seguros (por teléfono), después los posibles homónimos.
-	return [...creditos.values()]
-		.sort(
-			(a, b) =>
-				Number(a.soloPorNombre) - Number(b.soloPorNombre) ||
-				a.numeroSifco.localeCompare(b.numeroSifco),
-		)
-		.slice(0, LIMITE_CREDITOS_RELACIONADOS);
+	// Primero los seguros (por teléfono), después los posibles homónimos. Sin
+	// tope acá: el tope de la card va DESPUÉS del filtro de acceso
+	// (`buscarCreditosRelacionados`), si no un homónimo que el usuario sí
+	// puede abrir podía quedar cortado detrás de otros que no.
+	return [...creditos.values()].sort(
+		(a, b) =>
+			Number(a.soloPorNombre) - Number(b.soloPorNombre) ||
+			a.numeroSifco.localeCompare(b.numeroSifco),
+	);
 }
 
 /** Lo que de verdad es cada crédito: de quién es y qué vehículo financia. */
@@ -353,4 +361,18 @@ export function resolverCreditosCanonicos(params: {
 		});
 	}
 	return creditos;
+}
+
+/**
+ * Lo que llega a la card. Un nombre igual puede ser un homónimo: no alcanza
+ * para mostrarle a alguien un crédito que no puede abrir, así que solo pasa si
+ * ya tiene acceso. El tope va DESPUÉS de ese filtro, para no cortar un
+ * homónimo abrible detrás de otros que no lo son.
+ */
+export function filtrarPorAccesoYTopar<
+	T extends { soloPorNombre: boolean; puedeAbrir: boolean },
+>(creditos: T[]): T[] {
+	return creditos
+		.filter((c) => !c.soloPorNombre || c.puedeAbrir)
+		.slice(0, LIMITE_CREDITOS_RELACIONADOS);
 }

@@ -3,6 +3,7 @@ import {
 	armarSemillas,
 	consolidarCreditosRelacionados,
 	type FilaPersonaEnCredito,
+	filtrarPorAccesoYTopar,
 	normalizarNombre,
 	resolverCreditosCanonicos,
 } from "./creditos-relacionados";
@@ -326,5 +327,31 @@ describe("resolverCreditosCanonicos", () => {
 			oportunidades: [opp({ id: "opp-c", vehicleId: "veh-opp" })],
 		});
 		expect(r.get("1")?.vehicleId).toBe("veh-contrato");
+	});
+});
+
+describe("filtrarPorAccesoYTopar", () => {
+	it("no corta un homónimo abrible detrás de 20 que no se pueden abrir", () => {
+		const ajenos = Array.from({ length: 25 }, (_, i) => ({
+			id: `ajeno-${i}`,
+			soloPorNombre: true,
+			puedeAbrir: false,
+		}));
+		const r = filtrarPorAccesoYTopar([
+			...ajenos,
+			{ id: "propio", soloPorNombre: true, puedeAbrir: true },
+		]);
+		expect(r.map((c) => c.id)).toEqual(["propio"]);
+	});
+
+	it("los de teléfono pasan siempre y el tope es 20", () => {
+		const r = filtrarPorAccesoYTopar(
+			Array.from({ length: 30 }, (_, i) => ({
+				id: i,
+				soloPorNombre: false,
+				puedeAbrir: false,
+			})),
+		);
+		expect(r).toHaveLength(20);
 	});
 });

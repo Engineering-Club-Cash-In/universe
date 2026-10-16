@@ -127,4 +127,57 @@ describe("syncTokensToCartera", () => {
       console.error = original;
     }
   });
+  describe("lista blanca y dry-run", () => {
+    const users = () => [
+      { id: 10, creditoId: 249, token: "t249", identifier: "100000001", nexaUserId: 1, active: true, description: "Credito 249", prefix: "32200" },
+      { id: 11, creditoId: 77, token: "32200100000002", identifier: "100000002", nexaUserId: 2, active: true, description: "Prueba QA" },
+      { id: 12, creditoId: 299, token: "t299", identifier: "100000003", nexaUserId: 3, active: false },
+    ];
+
+    test("creditoIds sincroniza solo esos y reporta los que no tienen token activo", async () => {
+      const llamados: number[] = [];
+      const summary = await syncTokensToCartera({
+        tokenUsers: { list: async () => users() },
+        cartera: { registerNexaToken: async (p: { creditoId: number }) => { llamados.push(p.creditoId); return { status: "CREATED" as const }; } },
+        cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
+        creditoIds: [249, 299, 999],
+      });
+      expect(llamados).toEqual([249]);
+      expect(summary.total).toBe(1);
+      expect(summary.created).toBe(1);
+      expect(summary.notFound).toEqual([299, 999]);
+    });
+
+    test("sin creditoIds no hay filtro ni notFound", async () => {
+      const llamados: number[] = [];
+      const summary = await syncTokensToCartera({
+        tokenUsers: { list: async () => users() },
+        cartera: { registerNexaToken: async (p: { creditoId: number }) => { llamados.push(p.creditoId); return { status: "CREATED" as const }; } },
+        cancelledTokenUsers: { deactivateByCreditoId: async () => 0 },
+      });
+      expect(llamados).toEqual([249, 77]);
+      expect(summary.notFound).toBeUndefined();
+    });
+
+    test("dry-run no llama a cartera ni desactiva, ni con credit_cancelled; no muestra el token completo", async () => {
+      let llamadas = 0;
+      let desactivaciones = 0;
+      const summary = await syncTokensToCartera({
+        tokenUsers: { list: async () => users() },
+        cartera: { registerNexaToken: async () => { llamadas += 1; return { status: "REJECTED" as const, reason: "credit_cancelled" }; } },
+        cancelledTokenUsers: { deactivateByCreditoId: async () => { desactivaciones += 1; return 1; } },
+        creditoIds: [249, 77],
+        dryRun: true,
+      });
+      expect(llamadas).toBe(0);
+      expect(desactivaciones).toBe(0);
+      expect(summary.wouldRegister).toEqual([
+        { id: 10, creditoId: 249, tokenLast4: "0001", description: "Credito 249" },
+        { id: 11, creditoId: 77, tokenLast4: "0002", description: "Prueba QA" },
+      ]);
+      expect(summary.created + summary.updated + summary.unchanged).toBe(0);
+      expect(summary.rejected).toEqual([]);
+      expect(JSON.stringify(summary)).not.toContain("32200");
+    });
+  });
 });

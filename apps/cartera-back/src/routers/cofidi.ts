@@ -40,7 +40,7 @@ import {
   SAT_CONFIG,
   getInversionistaFacturadorConfig,
 } from "../utils/functions/const";
-import { EMISORES, emisorPorClave, emisoresParaSelector } from "../cofidi/emisores";
+import { EMISORES, emisorPorClave, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales } from "../cofidi/emisores";
 
 type FacturadorConfig = Pick<DTERequest, "emisor" | "tipoDocumento" | "codigoMoneda" | "frases">;
 type FacturarGenericoItem = {
@@ -3462,6 +3462,15 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
           set.status = 400;
           return { success: false, error: `Emisor "${emisor}" no existe.` };
         }
+
+        if (!emisorTieneCredenciales(emisorEntry)) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `El emisor ${emisorEntry.nombre} no tiene credenciales de COFIDI configuradas.`,
+          };
+        }
+
         const emisorKey = emisorEntry.clave;
         const emisorConfig = { config: emisorEntry.config, satConfig: emisorEntry.satConfig };
 
@@ -3548,7 +3557,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
 
           return {
             numeroLinea: index + 1,
-            bienOServicio: "B",
+            bienOServicio: emisorEntry.bienOServicio,
             cantidad: 1,
             unidadMedida: "UND",
             descripcion: item.rubro,
@@ -3574,18 +3583,11 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         // ============================================
         const fechaHoy = new Date().toISOString().split("T")[0];
 
-        const complementos = [
-          {
-            tipo: "cambiario",
-            abonos: [
-              {
-                numeroAbono: 1,
-                fechaVencimiento: fecha_vencimiento ?? fechaHoy,
-                montoAbono: parseFloat(totalFactura.toFixed(2)),
-              },
-            ],
-          },
-        ];
+        const complementos = complementosFacturaGenerica(
+          emisorEntry.config.tipoDocumento,
+          parseFloat(totalFactura.toFixed(2)),
+          fecha_vencimiento ?? fechaHoy
+        );
 
         // ============================================
         // 5️⃣ CERTIFICAR FACTURA (con emisor seleccionado)

@@ -26,15 +26,16 @@ import {
  * (/facturar-pago-completo): eso lo decide INVERSIONISTAS_FACTURADORES en const.ts.
  *
  * `bienOServicio`: cómo van sus líneas en Facturas Genéricas (B = bien, S = servicio).
+ * `logoEnv`: env con la URL del logo propio para el PDF (null = logo de siempre).
  */
 export const EMISORES = [
-  { clave: "CUBE", nombre: "CUBE", config: CLUB_CASHIN_CONFIG, satConfig: SAT_CONFIG, bienOServicio: "B" as const },
-  { clave: "SE_PRESTA", nombre: "Se Presta", config: SE_PRESTA_CONFIG, satConfig: SE_PRESTA_SAT_CONFIG, bienOServicio: "B" as const },
-  { clave: "AMJK", nombre: "AMJK", config: AMJK_CONFIG, satConfig: AMJK_SAT_CONFIG, bienOServicio: "B" as const },
-  { clave: "CREACION_IMAGEN", nombre: "Creación Imagen", config: CREACION_IMAGEN_CONFIG, satConfig: CREACION_IMAGEN_SAT_CONFIG, bienOServicio: "B" as const },
-  { clave: "GRUPO_BATRO", nombre: "Grupo Batro", config: GRUPO_BATRO_CONFIG, satConfig: GRUPO_BATRO_SAT_CONFIG, bienOServicio: "B" as const },
-  { clave: "AUTOCASH", nombre: "AutoCash", config: AUTOCASH_CONFIG, satConfig: AUTOCASH_SAT_CONFIG, bienOServicio: "B" as const },
-  { clave: "CHECKIN", nombre: "Checkin (MotorLab)", config: CHECKIN_CONFIG, satConfig: CHECKIN_SAT_CONFIG, bienOServicio: "S" as const },
+  { clave: "CUBE", nombre: "CUBE", config: CLUB_CASHIN_CONFIG, satConfig: SAT_CONFIG, bienOServicio: "B" as const, logoEnv: null as string | null },
+  { clave: "SE_PRESTA", nombre: "Se Presta", config: SE_PRESTA_CONFIG, satConfig: SE_PRESTA_SAT_CONFIG, bienOServicio: "B" as const, logoEnv: null as string | null },
+  { clave: "AMJK", nombre: "AMJK", config: AMJK_CONFIG, satConfig: AMJK_SAT_CONFIG, bienOServicio: "B" as const, logoEnv: null as string | null },
+  { clave: "CREACION_IMAGEN", nombre: "Creación Imagen", config: CREACION_IMAGEN_CONFIG, satConfig: CREACION_IMAGEN_SAT_CONFIG, bienOServicio: "B" as const, logoEnv: null as string | null },
+  { clave: "GRUPO_BATRO", nombre: "Grupo Batro", config: GRUPO_BATRO_CONFIG, satConfig: GRUPO_BATRO_SAT_CONFIG, bienOServicio: "B" as const, logoEnv: null as string | null },
+  { clave: "AUTOCASH", nombre: "AutoCash", config: AUTOCASH_CONFIG, satConfig: AUTOCASH_SAT_CONFIG, bienOServicio: "B" as const, logoEnv: null as string | null },
+  { clave: "CHECKIN", nombre: "Checkin (MotorLab)", config: CHECKIN_CONFIG, satConfig: CHECKIN_SAT_CONFIG, bienOServicio: "S" as const, logoEnv: "CHECKIN_LOGO_URL" as const },
 ] as const;
 
 export type Emisor = (typeof EMISORES)[number];
@@ -75,4 +76,17 @@ export function complementosFacturaGenerica(
 /** Un emisor sin requestor o sin URL de COFIDI no puede facturar: mejor decirlo que fallar en COFIDI. */
 export function emisorTieneCredenciales(emisor: Emisor): boolean {
   return Boolean(emisor.satConfig.requestor && emisor.satConfig.endpointUrl);
+}
+
+/**
+ * URL del logo para el PDF de una factura de este emisor: el propio si el
+ * emisor tiene `logoEnv` y esa env está puesta; si no, `porDefecto`.
+ */
+export function logoUrlEmisor(
+  nitEmisor: string | null | undefined,
+  porDefecto: string,
+  env: Record<string, string | undefined> = process.env
+): string {
+  const variable = emisorPorNit(nitEmisor)?.logoEnv;
+  return (variable && env[variable]) || porDefecto;
 }

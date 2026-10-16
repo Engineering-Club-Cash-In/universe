@@ -40,7 +40,7 @@ import {
   SAT_CONFIG,
   getInversionistaFacturadorConfig,
 } from "../utils/functions/const";
-import { EMISORES, emisorPorClave, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales } from "../cofidi/emisores";
+import { EMISORES, emisorPorClave, emisoresParaSelector, complementosFacturaGenerica, emisorTieneCredenciales, logoUrlEmisor } from "../cofidi/emisores";
 
 type FacturadorConfig = Pick<DTERequest, "emisor" | "tipoDocumento" | "codigoMoneda" | "frases">;
 type FacturarGenericoItem = {
@@ -4616,9 +4616,11 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     // ============================================
     // 5️⃣ GENERAR HTML DEL PDF
     // ============================================
-    const logoUrl =
+    const logoUrl = logoUrlEmisor(
+      String(emisorConfig.emisor.nit),
       process.env.LOGO_URL ||
-      "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
+        "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png"
+    );
 
     // Los datos del PDF se arman acá (el XML ya está parseado) pero el HTML y
     // el render se hacen FUERA del request, después de guardar en BD (paso 7).

@@ -36,12 +36,12 @@ const PDF_TIMEOUT_MS = 30000;
 type DatosFactura = Parameters<typeof generarHTMLFacturaPro>[0];
 
 /**
- * Cache en memoria del logo como data URI. Se guarda la PROMESA para que varias
+ * Cache en memoria del logo como data URI, uno por URL. Se guarda la PROMESA para que varias
  * facturas en paralelo compartan una sola descarga. Si la descarga falla se
- * limpia el cache y se devuelve la URL remota (el PDF sale igual, solo que el
+ * limpia el cache para esa URL y se devuelve la URL remota (el PDF sale igual, solo que el
  * render tendrá que ir a buscarla).
  */
-let logoDataUriPromise: Promise<string> | null = null;
+const logoDataUriPorUrl = new Map<string, Promise<string>>();
 
 async function descargarLogoComoDataUri(logoUrl: string): Promise<string> {
   const res = await fetch(logoUrl, {
@@ -54,17 +54,19 @@ async function descargarLogoComoDataUri(logoUrl: string): Promise<string> {
 }
 
 export function getLogoParaPDF(logoUrl: string): Promise<string> {
-  if (!logoDataUriPromise) {
-    logoDataUriPromise = descargarLogoComoDataUri(logoUrl).catch((error) => {
+  let promesa = logoDataUriPorUrl.get(logoUrl);
+  if (!promesa) {
+    promesa = descargarLogoComoDataUri(logoUrl).catch((error) => {
       console.error(
         `⚠️ [facturaPdf] No se pudo embeber el logo (${logoUrl}), se usa la URL remota:`,
         (error as Error).message
       );
-      logoDataUriPromise = null; // que el siguiente PDF lo reintente
+      logoDataUriPorUrl.delete(logoUrl); // que el siguiente PDF lo reintente
       return logoUrl;
     });
+    logoDataUriPorUrl.set(logoUrl, promesa);
   }
-  return logoDataUriPromise;
+  return promesa;
 }
 
 async function generarYSubirPDF({

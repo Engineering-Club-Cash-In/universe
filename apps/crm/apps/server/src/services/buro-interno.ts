@@ -1303,31 +1303,27 @@ async function registrarCoincidenciasCarteraSinCola(
 				// nace con su leadId y DPI, y la identidad base de Cartera que
 				// coincide con la misma persona resuelve después a esa ficha.
 				.sort((a, b) => Number(Boolean(b.lead)) - Number(Boolean(a.lead)));
-		// Un cliente de una sola identidad es una sola persona: si su lead ya
-		// coincidió, la identidad base no crea otra ficha aunque el nombre esté
-		// escrito distinto; sus candidatos se suman al objetivo del lead.
+		// Un cliente de una sola identidad es una sola persona: si alguno de sus
+		// leads coincidió, se usa un solo objetivo (el primer lead) con los
+		// candidatos de todos, para no crear varias fichas de la misma persona.
 		const identidadUnica = !(
 			grupos.get(usuarioId)?.usuario.nombre.includes("/") ?? true
 		);
 		const conLead = objetivosUsuario.filter((objetivo) => objetivo.lead);
+		const [primerLead] = conLead;
 		objetivosPorUsuario.set(
 			usuarioId,
-			identidadUnica && conLead.length > 0
-				? conLead.map((objetivo, indice) =>
-						indice === 0
-							? {
-									...objetivo,
-									candidatos: [
-										...new Set([
-											...objetivo.candidatos,
-											...objetivosUsuario
-												.filter((base) => !base.lead)
-												.flatMap((base) => base.candidatos),
-										]),
-									],
-								}
-							: objetivo,
-					)
+			identidadUnica && primerLead
+				? [
+						{
+							...primerLead,
+							candidatos: [
+								...new Set(
+									objetivosUsuario.flatMap((objetivo) => objetivo.candidatos),
+								),
+							],
+						},
+					]
 				: objetivosUsuario,
 		);
 	}

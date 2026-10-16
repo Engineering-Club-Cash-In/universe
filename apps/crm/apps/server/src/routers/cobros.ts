@@ -5656,10 +5656,56 @@ export const cobrosRouter = {
 						// veían como uno. Se filtran los recibos pre-sembrados (filas de
 						// pago sin monto): existen para cobrar después, no son abonos.
 						const pagosPorCuota = new Map<number, any[]>();
+						// Lo aplicado a la CUOTA por cada pago, sumado por cuota. Va aparte
+						// de `pagosPorCuota`: un pago legacy puede traer la plata solo en
+						// los rubros, con boleta y monto aplicado en 0, y no por eso debe
+						// salir como un pago más en la lista visible.
+						const abonadoPorCuota = new Map<number, number>();
+						const pagosContados = new Set<number>();
 						for (const fila of cuotasCombinadas) {
 							if (!fila.pago_id) continue;
 							const montoBoleta = Number(fila.monto_boleta ?? 0);
 							const montoAplicado = Number(fila.monto_aplicado ?? 0);
+
+							// Lo aplicado a la CUOTA contractual (capital + interés + IVA +
+							// seguro + GPS + membresías): la misma suma que
+							// `sumarAplicadoACuota` de cartera-back. `monto_aplicado` no sirve
+							// porque un pago legacy lo carga con mora, otros o convenio.
+							// Cuentan los pagos no anulados `validated`/`pending` y los
+							// `no_required` con plata real en los rubros (un legacy como el
+							// del crédito 890; las semillas de SIFCO traen los rubros en 0 y
+							// aportan 0). Un abono directo a capital (`capital`) no paga la
+							// cuota.
+							const estadoPago = fila.validationStatus;
+							const pagoVivo =
+								(estadoPago === "validated" ||
+									estadoPago === "pending" ||
+									estadoPago === "no_required") &&
+								fila.paymentFalse !== true;
+							const rubrosCuota = Math.round(
+								[
+									fila.abono_capital,
+									fila.abono_interes,
+									fila.abono_iva_12,
+									fila.abono_seguro,
+									fila.abono_gps,
+									fila.membresias_pago,
+								].reduce((suma, r) => suma + Number(r ?? 0), 0) * 100,
+							);
+							const montoAplicadoCuota = pagoVivo ? rubrosCuota / 100 : 0;
+							// Cada pago se cuenta una vez (puede venir en dos listas).
+							if (!pagosContados.has(fila.pago_id)) {
+								pagosContados.add(fila.pago_id);
+								abonadoPorCuota.set(
+									fila.numero_cuota,
+									Math.round(
+										((abonadoPorCuota.get(fila.numero_cuota) ?? 0) +
+											montoAplicadoCuota) *
+											100,
+									) / 100,
+								);
+							}
+
 							if (montoBoleta <= 0 && montoAplicado <= 0) continue;
 
 							const lista = pagosPorCuota.get(fila.numero_cuota) ?? [];
@@ -5709,11 +5755,45 @@ export const cobrosRouter = {
 							}
 						}
 
+						// Mora GENERADA por cuota vencida (cartera-back). `pago_mora` es la
+						// cobrada en una fila de pago: una vencida sin pagos no la tiene.
+						// Un crédito legacy puede tener varias filas abiertas con el mismo
+						// `numero_cuota`: el cron genera mora por cada una y el plan las
+						// muestra como una sola cuota, así que se suman por número.
+						const desglosePorCuota = new Map<
+							number,
+							{
+								dias_atraso: number;
+								topada: boolean;
+								generado: string;
+								abonado: string;
+								pendiente: string;
+							}
+						>();
+						for (const d of creditoCompleto.desgloseMora?.cuotas ?? []) {
+							const previo = desglosePorCuota.get(d.numero_cuota);
+							const sumar = (a: string | undefined, b: string) =>
+								(
+									Math.round((Number(a ?? 0) + Number(b)) * 100) / 100
+								).toFixed(2);
+							desglosePorCuota.set(d.numero_cuota, {
+								dias_atraso: Math.max(previo?.dias_atraso ?? 0, d.dias_atraso),
+								topada: (previo?.topada ?? false) || d.topada,
+								generado: sumar(previo?.generado, d.generado),
+								abonado: sumar(previo?.abonado, d.abonado),
+								pendiente: sumar(previo?.pendiente, d.pendiente),
+							});
+						}
+
 						// Mapear a estructura esperada por frontend
 						return Array.from(cuotasUnicas.values())
 							.sort((a, b) => a.numero_cuota - b.numero_cuota)
 							.map((cuota) => {
 								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+								// También con la cuota pagada: un legacy con filas duplicadas
+								// puede tener la nueva pagada y la vieja impaga, y el cron sigue
+								// generando mora sobre la vieja.
+								const desglose = desglosePorCuota.get(cuota.numero_cuota);
 								const montoCuota = resolveInstallmentAmount(
 									cuota.cuota,
 									creditoCompleto.credito.cuota,
@@ -5743,7 +5823,13 @@ export const cobrosRouter = {
 											? "en_validacion"
 											: "pendiente",
 									pagos: pagosPorCuota.get(cuota.numero_cuota) ?? [],
-									diasMora: 0,
+									// Lo ya abonado a la cuota contractual (sin mora/otros).
+									abonadoCuota: abonadoPorCuota.get(cuota.numero_cuota) ?? 0,
+									diasMora: desglose?.dias_atraso ?? 0,
+									moraGenerada: desglose ? Number(desglose.generado) : 0,
+									moraAbonada: desglose ? Number(desglose.abonado) : 0,
+									moraPendiente: desglose ? Number(desglose.pendiente) : 0,
+									moraTopada: desglose?.topada ?? false,
 									detallesPago: cuota.pagado
 										? {
 												abonoCapital: cuota.abono_capital || "0",

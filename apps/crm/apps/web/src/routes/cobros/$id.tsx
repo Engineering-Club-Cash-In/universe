@@ -1940,8 +1940,7 @@ function RouteComponent() {
 	const planOrdenado = ordenarPlanDePagos(cuotas as any[]);
 
 	// "Cobro de hoy" (mismas cuentas que el «Total a cobrar» de antes).
-	const { totalMoraCuotas, totalParcial, avisoCrecimientoMora } =
-		cobroDeHoy(caso);
+	const { totalMoraCuotas, avisoCrecimientoMora } = cobroDeHoy(caso);
 
 	// Historial de Cobranza (Resumen): las 3 gestiones más recientes, promesas
 	// incluidas (la lista completa vive en la pestaña Historial).
@@ -2849,7 +2848,6 @@ function RouteComponent() {
 										contexto={[
 											`Cuota mensual ${fmtQ(caso.cuotaMensual)}`,
 											`${diasMora} días en mora`,
-											`Total parcial (${caso.cuotaConvenio != null ? "Convenio + Cuota" : "Mora + Cuota"}) ${fmtQ(totalParcial)}`,
 										]}
 									/>
 								)}
@@ -3984,15 +3982,22 @@ function RouteComponent() {
 													!enValidacion &&
 													!!cuota.fechaVencimiento &&
 													new Date(cuota.fechaVencimiento) < hoyInicio;
-												const tieneMora = Number(cuota.montoMora) > 0;
+												// Vencida impaga: la mora GENERADA (cartera-back) que aún
+												// falta cobrar; si no hay desglose, la `pago_mora` de siempre.
+												const moraGenerada =
+													!esPagada && Number(cuota.moraGenerada) > 0;
+												const moraMostrada = moraGenerada
+													? Number(cuota.moraPendiente)
+													: Number(cuota.montoMora);
+												const tieneMora = moraMostrada > 0;
 												const pagoConMora = esPagada && tieneMora;
+												// Cuota pagada con una fila hermana impaga que sigue generando
+												// mora (legacy con filas duplicadas).
+												const moraPendienteDeDuplicada =
+													esPagada && Number(cuota.moraPendiente) > 0;
 												const abonado = esPagada
 													? 0
-													: (cuota.pagos ?? []).reduce(
-															(suma: number, pago: any) =>
-																suma + Number(pago.montoAplicado ?? 0),
-															0,
-														);
+													: Number(cuota.abonadoCuota ?? 0);
 												const saldoCuota = Math.max(
 													Number(cuota.montoCuota) - abonado,
 													0,
@@ -4013,12 +4018,15 @@ function RouteComponent() {
 														monto={fmtQ(cuota.montoCuota)}
 														montoDetalle={
 															tieneMora
-																? `+${fmtQ(cuota.montoMora)} mora`
+																? `+${fmtQ(moraMostrada)} mora`
 																: undefined
 														}
 														chips={
 															pagoConMora ||
-															(!esPagada && tieneMora) ||
+															moraPendienteDeDuplicada ||
+															(!esPagada &&
+																tieneMora &&
+																Number(cuota.diasMora) > 0) ||
 															(!enValidacion && !esPagada && abonado > 0) ? (
 																<>
 																	{pagoConMora && (
@@ -4026,14 +4034,24 @@ function RouteComponent() {
 																			Pagado con mora
 																		</Badge>
 																	)}
-																	{!esPagada && tieneMora && (
+																	{moraPendienteDeDuplicada && (
 																		<Badge
 																			variant="destructive"
 																			className="text-xs"
 																		>
-																			{cuota.diasMora} días mora
+																			Mora pendiente {fmtQ(cuota.moraPendiente)}
 																		</Badge>
 																	)}
+																	{!esPagada &&
+																		tieneMora &&
+																		Number(cuota.diasMora) > 0 && (
+																			<Badge
+																				variant="destructive"
+																				className="text-xs"
+																			>
+																				{cuota.diasMora} días de mora
+																			</Badge>
+																		)}
 																	{!enValidacion &&
 																		!esPagada &&
 																		abonado > 0 && (
@@ -4055,14 +4073,56 @@ function RouteComponent() {
 																	? ["Pago recibido, en validación"]
 																	: tieneMora
 																		? [
-																				`Total: ${fmtQ(Number(cuota.montoCuota) + Number(cuota.montoMora))}`,
+																				`Total: ${fmtQ(saldoCuota + moraMostrada)}`,
 																			]
 																		: []),
 														]}
 													>
 														{(cuota.pagos?.length ?? 0) > 0 ||
+														moraGenerada ||
 														(esPagada && cuota.detallesPago) ? (
 															<div className="space-y-2">
+																{moraGenerada && (
+																	<div className="mt-2 border-t pt-2 text-xs">
+																		<p className="mb-1 font-medium text-muted-foreground">
+																			Mora de esta cuota
+																		</p>
+																		<div className="space-y-1 rounded bg-red-50 p-2 dark:bg-red-950/30">
+																			<div className="flex justify-between">
+																				<span className="text-muted-foreground">
+																					Mora generada
+																				</span>
+																				<span className="font-medium">
+																					{fmtQ(cuota.moraGenerada)}
+																				</span>
+																			</div>
+																			{Number(cuota.moraAbonada) > 0 && (
+																				<div className="flex justify-between">
+																					<span className="text-muted-foreground">
+																						Mora abonada
+																					</span>
+																					<span className="font-medium">
+																						{fmtQ(cuota.moraAbonada)}
+																					</span>
+																				</div>
+																			)}
+																			<div className="flex justify-between">
+																				<span className="text-muted-foreground">
+																					Mora pendiente
+																				</span>
+																				<span className="font-medium text-red-700 dark:text-red-300">
+																					{fmtQ(cuota.moraPendiente)}
+																				</span>
+																			</div>
+																			<p className="text-muted-foreground">
+																				{cuota.diasMora} días de atraso
+																				{cuota.moraTopada
+																					? " · alcanzó el tope mensual de la cuota"
+																					: ""}
+																			</p>
+																		</div>
+																	</div>
+																)}
 																{(cuota.pagos?.length ?? 0) > 0 && (
 																	<div className="mt-2 border-t pt-2">
 																		<p className="mb-1 font-medium text-muted-foreground text-xs">

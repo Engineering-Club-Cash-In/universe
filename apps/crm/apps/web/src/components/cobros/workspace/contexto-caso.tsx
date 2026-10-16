@@ -1101,13 +1101,14 @@ function cuotaDelPlan(
 		!enValidacion &&
 		!!cuota.fechaVencimiento &&
 		new Date(cuota.fechaVencimiento) < hoyInicio;
-	const tieneMora = Number(cuota.montoMora) > 0;
-	const abonado = esPagada
-		? 0
-		: (cuota.pagos ?? []).reduce(
-				(suma, pago) => suma + Number(pago.montoAplicado ?? 0),
-				0,
-			);
+	// Vencida impaga: mora GENERADA pendiente (cartera-back); si no hay
+	// desglose, la `pago_mora` de siempre.
+	const moraMostrada =
+		!esPagada && Number(cuota.moraGenerada) > 0
+			? Number(cuota.moraPendiente)
+			: Number(cuota.montoMora);
+	const tieneMora = moraMostrada > 0;
+	const abonado = esPagada ? 0 : Number(cuota.abonadoCuota ?? 0);
 	const saldoCuota = Math.max(Number(cuota.montoCuota) - abonado, 0);
 	const estado: EstadoCuota = esPagada
 		? "pagada"
@@ -1122,7 +1123,7 @@ function cuotaDelPlan(
 		titulo: `Cuota ${cuota.numeroCuota} de ${totalCuotas}`,
 		estado,
 		monto: fmtQ(cuota.montoCuota),
-		montoDetalle: tieneMora ? `+${fmtQ(cuota.montoMora)} mora` : undefined,
+		montoDetalle: tieneMora ? `+${fmtQ(moraMostrada)} mora` : undefined,
 		lineas: [
 			`${vencida ? "Venció" : "Vence"} ${fecha}`,
 			...(esPagada
@@ -1135,6 +1136,13 @@ function cuotaDelPlan(
 		],
 		chips: [
 			...(esPagada && tieneMora ? ["Pagado con mora"] : []),
+			// Pagada, pero una fila hermana impaga (legacy duplicado) sigue en mora.
+			...(esPagada && Number(cuota.moraPendiente) > 0
+				? [`Mora pendiente ${fmtQ(cuota.moraPendiente)}`]
+				: []),
+			...(!esPagada && tieneMora && Number(cuota.diasMora) > 0
+				? [`${cuota.diasMora} días de mora`]
+				: []),
 			...(!esPagada && !enValidacion && abonado > 0
 				? [`Abonado ${fmtQ(abonado)} · Falta ${fmtQ(saldoCuota)}`]
 				: []),

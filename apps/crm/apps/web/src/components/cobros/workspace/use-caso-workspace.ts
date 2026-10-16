@@ -134,6 +134,14 @@ export type GestionCaso = ContactoHistorialFila &
 
 /** Una cuota del plan de pagos (`getHistorialPagos`). */
 export type CuotaPlan = CuotaHistorialFila & {
+	/** Mora generada por la cuota vencida impaga (cartera-back `desgloseMora`). */
+	/** Lo ya abonado a la cuota contractual (sin mora/otros ni abonos a capital). */
+	abonadoCuota?: number;
+	moraGenerada?: number;
+	moraAbonada?: number;
+	moraPendiente?: number;
+	/** Llegó al tope mensual (30 días de atraso). */
+	moraTopada?: boolean;
 	pagos?: Array<{
 		pagoId?: number;
 		montoBoleta?: string | number | null;

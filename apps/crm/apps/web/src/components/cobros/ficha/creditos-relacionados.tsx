@@ -35,6 +35,26 @@ type CreditoRelacionado = Awaited<
 type EstadoCartera = CreditoRelacionado["estado"];
 type Motivo = CreditoRelacionado["motivos"][number];
 
+type Persona = CreditoRelacionado["personas"][number];
+
+const sinTildes = (t: string) =>
+	t
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+
+/**
+ * «como Juan Pérez» cuando en el otro crédito figura con otro nombre (match
+ * por teléfono de una referencia, p. ej.); null si es el mismo.
+ */
+function comoAlla(p: Persona): string | null {
+	return sinTildes(p.nombre) === sinTildes(p.nombreAlla)
+		? null
+		: `como ${p.nombreAlla}`;
+}
+
 /** Papel de la persona en el caso que se está viendo (chip de la fila). */
 const ROL_AQUI = {
 	titular: "Titular aquí",
@@ -203,7 +223,12 @@ export function CardCreditosRelacionados({
 										<span className={cn(crmText.label, "truncate")}>
 											{[
 												persona
-													? `${ROL_EN[persona.rolAlla]} #${c.numeroSifco}`
+													? [
+															`${ROL_EN[persona.rolAlla]} #${c.numeroSifco}`,
+															comoAlla(persona),
+														]
+															.filter(Boolean)
+															.join(" ")
 													: `#${c.numeroSifco}`,
 												vehiculo,
 											]
@@ -331,7 +356,12 @@ function DialogResumenCreditoRelacionado({
 								{data.personas
 									.map(
 										(p) =>
-											`${p.nombre} (${ROL_AQUI[p.rolAqui].toLowerCase()}; ${ROL_EN[p.rolAlla].toLowerCase()} este crédito)`,
+											`${p.nombre} (${ROL_AQUI[p.rolAqui].toLowerCase()}; ${[
+												`${ROL_EN[p.rolAlla].toLowerCase()} este crédito`,
+												comoAlla(p),
+											]
+												.filter(Boolean)
+												.join(" ")})`,
 									)
 									.join(", ")}
 							</CrmDataField>

@@ -137,9 +137,15 @@ export type MotivoRelacion = {
 };
 
 export type PersonaRelacionada = {
+	/** Quién es en el caso que se está viendo (la semilla que coincidió). */
 	nombre: string;
-	/** Su papel en el caso que se está viendo (de quién vino la coincidencia). */
+	/** Su papel en el caso que se está viendo. */
 	rolAqui: OrigenSemilla;
+	/**
+	 * Cómo figura en el crédito relacionado. Con match por teléfono puede ser
+	 * otro nombre (una referencia «María» con el número del deudor «Juan»).
+	 */
+	nombreAlla: string;
 	/** Su papel en el crédito relacionado. */
 	rolAlla: "titular" | "codeudor";
 };
@@ -217,26 +223,30 @@ export function consolidarCreditosRelacionados(params: {
 			};
 			creditos.set(sifco, credito);
 		}
-		// Papel aquí: el de la semilla que hizo la coincidencia; si fueron
-		// varias (teléfono del titular y nombre del codeudor), la más fuerte.
-		const rolAqui = motivos
-			.map((m) => m.origen)
-			.sort((a, b) => PRIORIDAD_ORIGEN[a] - PRIORIDAD_ORIGEN[b])[0];
-		const nombrePersona = normalizarNombre(fila.personaNombre);
+		// Quién es aquí: la semilla que hizo la coincidencia; si fueron varias
+		// (teléfono del titular y nombre del codeudor), la más fuerte. Nombre y
+		// papel salen de la MISMA semilla: nunca el nombre de allá con el papel
+		// de aquí.
+		const principal = [...motivos].sort(
+			(a, b) => PRIORIDAD_ORIGEN[a.origen] - PRIORIDAD_ORIGEN[b.origen],
+		)[0];
+		const nombreAlla = normalizarNombre(fila.personaNombre);
 		const existente = credito.personas.find(
 			(p) =>
-				p.rolAlla === fila.rol && normalizarNombre(p.nombre) === nombrePersona,
+				p.rolAlla === fila.rol && normalizarNombre(p.nombreAlla) === nombreAlla,
 		);
 		if (!existente) {
 			credito.personas.push({
-				nombre: fila.personaNombre,
-				rolAqui,
+				nombre: principal.persona,
+				rolAqui: principal.origen,
+				nombreAlla: fila.personaNombre,
 				rolAlla: fila.rol,
 			});
 		} else if (
-			PRIORIDAD_ORIGEN[rolAqui] < PRIORIDAD_ORIGEN[existente.rolAqui]
+			PRIORIDAD_ORIGEN[principal.origen] < PRIORIDAD_ORIGEN[existente.rolAqui]
 		) {
-			existente.rolAqui = rolAqui;
+			existente.nombre = principal.persona;
+			existente.rolAqui = principal.origen;
 		}
 		for (const m of motivos) {
 			const repetido = credito.motivos.some(

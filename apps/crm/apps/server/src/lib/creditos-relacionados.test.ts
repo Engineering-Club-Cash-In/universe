@@ -114,9 +114,15 @@ describe("consolidarCreditosRelacionados", () => {
 			{
 				nombre: "Luis Fernando Aguilar",
 				rolAqui: "titular",
+				nombreAlla: "Luis Fernando Aguilar",
 				rolAlla: "codeudor",
 			},
-			{ nombre: "Pedro Ruiz", rolAqui: "referencia", rolAlla: "titular" },
+			{
+				nombre: "Pedro Ruiz",
+				rolAqui: "referencia",
+				nombreAlla: "Pedro Ruiz",
+				rolAlla: "titular",
+			},
 		]);
 		expect(r[0].motivos.map((m) => `${m.tipo}:${m.origen}`)).toEqual([
 			"telefono:titular",
@@ -156,7 +162,36 @@ describe("consolidarCreditosRelacionados", () => {
 			],
 		});
 		expect(r[0].personas).toEqual([
-			{ nombre: "Ana Gómez", rolAqui: "codeudor", rolAlla: "titular" },
+			{
+				nombre: "Ana Gómez",
+				rolAqui: "codeudor",
+				nombreAlla: "Ana Gómez",
+				rolAlla: "titular",
+			},
+		]);
+	});
+
+	it("con match por teléfono, el nombre de aquí es el de la semilla", () => {
+		const r = consolidarCreditosRelacionados({
+			semillas,
+			sifcoActual: null,
+			filas: [
+				// La referencia «Pedro Ruiz» tiene el número del deudor «Juan Pérez».
+				fila({
+					numeroSifco: "500",
+					rol: "titular",
+					personaNombre: "Juan Pérez",
+					personaTelefono: "7777-8888",
+				}),
+			],
+		});
+		expect(r[0].personas).toEqual([
+			{
+				nombre: "Pedro Ruiz",
+				rolAqui: "referencia",
+				nombreAlla: "Juan Pérez",
+				rolAlla: "titular",
+			},
 		]);
 	});
 

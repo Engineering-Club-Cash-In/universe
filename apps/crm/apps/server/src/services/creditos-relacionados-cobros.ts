@@ -9,8 +9,18 @@
  * contacto de terceros.
  */
 
-import { and, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import {
+	and,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	or,
+	type SQL,
+	sql,
+} from "drizzle-orm";
 import { db } from "../db";
+import { creditApplications } from "../db/schema/client-forms";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import {
@@ -27,12 +37,10 @@ import {
 	type Semillas,
 } from "../lib/creditos-relacionados";
 import { cargarCodeudores } from "../lib/ficha-complementos";
+import { fuentesDeReferencias } from "../lib/referencias-cobros";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
-import {
-	type ContextoCaso,
-	cargarReferencias,
-} from "./referencias-cobros-datos";
+import type { ContextoCaso } from "./referencias-cobros-datos";
 
 export type EstadoCarteraRelacionado = {
 	bucket: number | null;
@@ -81,8 +89,19 @@ function filtroNombres(expresion: SQL, nombres: string[]): SQL {
 	)})`;
 }
 
+/**
+ * Las semillas salen SOLO de datos que el rol cobros no puede editar: el lead
+ * y los codeudores (los edita el CRM) y las referencias de la solicitud de
+ * crédito (las llena el cliente con su token de ventas).
+ *
+ * Quedan fuera a propósito los teléfonos del caso (`casos_cobros`), las
+ * referencias que agrega cobros (`referencias_lead`) y los teléfonos que
+ * cobros les suma (`referencias_telefonos_cobros`): un asesor podría escribir
+ * ahí el número de otro cliente y, con eso, ver el resumen de un crédito que
+ * no es suyo.
+ */
 async function cargarSemillas(ctx: ContextoCaso): Promise<Semillas> {
-	const [lead, codeudores, referencias] = await Promise.all([
+	const [lead, codeudores, solicitudesTitular] = await Promise.all([
 		ctx.leadId
 			? db
 					.select({ nombre: nombreLeadSql, phone: leads.phone })
@@ -92,29 +111,55 @@ async function cargarSemillas(ctx: ContextoCaso): Promise<Semillas> {
 					.then((filas) => filas[0] ?? null)
 			: Promise.resolve(null),
 		cargarCodeudores(ctx),
-		cargarReferencias(ctx).then((r) => r.referencias),
+		ctx.opportunityId
+			? db
+					.select({
+						id: creditApplications.id,
+						referenciasPersonales: creditApplications.referenciasPersonales,
+						referenciasCrediticias: creditApplications.referenciasCrediticias,
+						conyugeNombre: creditApplications.conyugeNombre,
+						conyugeEmpresa: creditApplications.conyugeEmpresa,
+						conyugeTelMovil: creditApplications.conyugeTelMovil,
+						conyugeTelOficina: creditApplications.conyugeTelOficina,
+						telEmergencia: creditApplications.telEmergencia,
+					})
+					.from(creditApplications)
+					.where(
+						and(
+							eq(creditApplications.opportunityId, ctx.opportunityId),
+							// Solo la del titular; NULL = anterior a la migración 0015.
+							or(
+								eq(creditApplications.personType, "lead"),
+								isNull(creditApplications.personType),
+							),
+						),
+					)
+			: Promise.resolve([]),
 	]);
+
+	// Mismo armado de referencias que la pestaña Referencias, pero solo con
+	// las fuentes de ventas.
+	const referenciasVentas = fuentesDeReferencias({
+		referenciasLead: [],
+		solicitudesTitular,
+		codeudores: [],
+		telefonosAgregados: [],
+		contactos: [],
+	});
 
 	return armarSemillas({
 		titular: {
 			nombre: (lead?.nombre as string | undefined) ?? null,
-			telefonos: [
-				ctx.telefonoPrincipal,
-				ctx.telefonoAlternativo,
-				lead?.phone ?? null,
-			],
+			telefonos: [lead?.phone ?? null],
 		},
 		codeudores: (codeudores ?? []).map((c) => ({
 			nombre: c.nombre,
 			telefonos: [c.telefonoPrincipal, c.celularAlterno, c.telefonoCasa],
 		})),
-		// Los cofirmantes ya entran como codeudores.
-		referencias: referencias
-			.filter((r) => r.origen !== "cofirmante")
-			.map((r) => ({
-				nombre: r.nombre,
-				telefonos: r.telefonos.map((t) => t.telefono),
-			})),
+		referencias: referenciasVentas.map((r) => ({
+			nombre: r.nombre,
+			telefonos: r.telefonos.map((t) => t.telefono),
+		})),
 	});
 }
 

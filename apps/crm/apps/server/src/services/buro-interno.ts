@@ -1194,7 +1194,8 @@ async function registrarCoincidenciasCarteraSinCola(
 						sifcosParaEnriquecer,
 					),
 				),
-			);
+			)
+			.orderBy(leads.id);
 		const porSifco = indexarRelacionesLeadPorSifco(
 			leadsRelacionados,
 			sifcosParaEnriquecer,
@@ -1283,6 +1284,27 @@ async function registrarCoincidenciasCarteraSinCola(
 		),
 	});
 	const usuariosCoincidentes = new Set(fuentesPorUsuario.keys());
+	const fuentesAutomaticas = await tx
+		.select({
+			persona: buroInternoPersonas,
+			carteraUsuarioId: buroInternoFuentesCartera.carteraUsuarioId,
+		})
+		.from(buroInternoFuentesCartera)
+		.innerJoin(
+			buroInternoPersonas,
+			eq(buroInternoPersonas.id, buroInternoFuentesCartera.personaId),
+		)
+		.where(eq(buroInternoPersonas.origen, "automatico_cartera"));
+	// El lead de una ficha automática ya guardada se reutiliza para que el
+	// objetivo de un cliente de identidad única no cambie entre sincronizaciones.
+	const leadsAutomaticosPorUsuario = new Map<number, Set<string>>();
+	for (const fuente of fuentesAutomaticas) {
+		if (!fuente.persona.leadId) continue;
+		const leadsUsuario =
+			leadsAutomaticosPorUsuario.get(fuente.carteraUsuarioId) ?? new Set<string>();
+		leadsUsuario.add(fuente.persona.leadId);
+		leadsAutomaticosPorUsuario.set(fuente.carteraUsuarioId, leadsUsuario);
+	}
 	const objetivosPorUsuario = new Map<number, ObjetivoIdentidad[]>();
 	for (const [usuarioId, fuenteIds] of fuentesPorUsuario) {
 		const objetivosUsuario: ObjetivoIdentidad[] = fuenteIds.flatMap((fuenteId) => {
@@ -1304,13 +1326,18 @@ async function registrarCoincidenciasCarteraSinCola(
 				// coincide con la misma persona resuelve después a esa ficha.
 				.sort((a, b) => Number(Boolean(b.lead)) - Number(Boolean(a.lead)));
 		// Un cliente de una sola identidad es una sola persona: si alguno de sus
-		// leads coincidió, se usa un solo objetivo (el primer lead) con los
-		// candidatos de todos, para no crear varias fichas de la misma persona.
+		// leads coincidió, se usa un solo objetivo (el lead de su ficha automática
+		// si ya existe, o el primero en orden estable) con los candidatos de todos,
+		// para no crear varias fichas de la misma persona.
 		const identidadUnica = !(
 			grupos.get(usuarioId)?.usuario.nombre.includes("/") ?? true
 		);
 		const conLead = objetivosUsuario.filter((objetivo) => objetivo.lead);
-		const [primerLead] = conLead;
+		const leadsGuardados = leadsAutomaticosPorUsuario.get(usuarioId);
+		const primerLead =
+			conLead.find(
+				(objetivo) => objetivo.lead && leadsGuardados?.has(objetivo.lead.id),
+			) ?? conLead[0];
 		objetivosPorUsuario.set(
 			usuarioId,
 			identidadUnica && primerLead
@@ -1327,17 +1354,6 @@ async function registrarCoincidenciasCarteraSinCola(
 				: objetivosUsuario,
 		);
 	}
-		const fuentesAutomaticas = await tx
-			.select({
-				persona: buroInternoPersonas,
-				carteraUsuarioId: buroInternoFuentesCartera.carteraUsuarioId,
-			})
-			.from(buroInternoFuentesCartera)
-			.innerJoin(
-				buroInternoPersonas,
-				eq(buroInternoPersonas.id, buroInternoFuentesCartera.personaId),
-			)
-			.where(eq(buroInternoPersonas.origen, "automatico_cartera"));
 		const personasAutomaticas = new Map<
 			string,
 			{

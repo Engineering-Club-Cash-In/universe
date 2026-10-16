@@ -11,6 +11,7 @@
 
 import {
 	and,
+	desc,
 	eq,
 	inArray,
 	isNotNull,
@@ -21,7 +22,8 @@ import {
 } from "drizzle-orm";
 import { db } from "../db";
 import { creditApplications } from "../db/schema/client-forms";
-import { coDebtors, leads, opportunities } from "../db/schema/crm";
+import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
+import { clients, coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	duenosEnCarteraPorSifco,
@@ -172,6 +174,73 @@ async function cargarSemillas(ctx: ContextoCaso): Promise<Semillas> {
 	});
 }
 
+/** Tope de filas por consulta (titulares / codeudores). */
+const LIMITE_FILAS = 200;
+
+/**
+ * La fila coincide por teléfono. Se selecciona y se ordena por ella ANTES del
+ * límite: un nombre común puede traer cientos de homónimos y, sin orden, el
+ * límite podía dejar fuera un crédito que sí coincide por teléfono.
+ */
+function porTelefono(columna: unknown, telefonos: string[]) {
+	return sql<boolean>`(${filtroTelefonos(columna, telefonos)})`.as(
+		"por_telefono",
+	);
+}
+
+/**
+ * SIFCO → id de su oportunidad canónica, con la misma regla que
+ * `resolverContextoCaso`: la del contrato vinculado al caso si lo hay; si no,
+ * la won/migrate más reciente. Un SIFCO puede repetirse en oportunidades
+ * viejas de otro lead, y una coincidencia en esa fila obsoleta no puede
+ * exponer el crédito de quien realmente lo tiene.
+ *
+ * Dos consultas por lote y solo para los candidatos: como subconsulta
+ * correlacionada costaba ~0.4 s por búsqueda (no hay índice por SIFCO).
+ */
+export async function oportunidadesCanonicas(
+	sifcos: string[],
+): Promise<Map<string, string>> {
+	const unicos = [...new Set(sifcos.filter(Boolean))];
+	if (unicos.length === 0) return new Map();
+	const [porContrato, porSifco] = await Promise.all([
+		db
+			.select({
+				sifco: casosCobros.numeroCreditoSifco,
+				id: clients.opportunityId,
+			})
+			.from(casosCobros)
+			.innerJoin(
+				contratosFinanciamiento,
+				eq(contratosFinanciamiento.id, casosCobros.contratoId),
+			)
+			.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+			.where(
+				and(
+					inArray(casosCobros.numeroCreditoSifco, unicos),
+					isNotNull(clients.opportunityId),
+				),
+			)
+			.orderBy(desc(casosCobros.createdAt)),
+		db
+			.select({ sifco: opportunities.numeroSifco, id: opportunities.id })
+			.from(opportunities)
+			.where(inArray(opportunities.numeroSifco, unicos))
+			.orderBy(
+				sql`CASE WHEN ${opportunities.status} IN ('won', 'migrate') THEN 0 ELSE 1 END`,
+				desc(opportunities.createdAt),
+			),
+	]);
+	const canonicas = new Map<string, string>();
+	// El contrato manda; después, la primera según el orden de arriba.
+	for (const f of [...porContrato, ...porSifco]) {
+		if (f.sifco && f.id && !canonicas.has(f.sifco)) {
+			canonicas.set(f.sifco, f.id);
+		}
+	}
+	return canonicas;
+}
+
 async function buscarFilas(
 	semillas: Semillas,
 ): Promise<FilaPersonaEnCredito[]> {
@@ -185,6 +254,7 @@ async function buscarFilas(
 	);
 	const columnasCredito = {
 		numeroSifco: opportunities.numeroSifco,
+		opportunityId: opportunities.id,
 		titularNombre: nombreLeadSql,
 		marca: vehicles.make,
 		modelo: vehicles.model,
@@ -194,7 +264,11 @@ async function buscarFilas(
 
 	const [titulares, codeudores] = await Promise.all([
 		db
-			.selectDistinct({ ...columnasCredito, personaTelefono: leads.phone })
+			.selectDistinct({
+				...columnasCredito,
+				personaTelefono: leads.phone,
+				porTelefono: porTelefono(leads.phone, telefonos),
+			})
 			.from(opportunities)
 			.innerJoin(leads, eq(leads.id, opportunities.leadId))
 			.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
@@ -207,12 +281,14 @@ async function buscarFilas(
 					),
 				),
 			)
-			.limit(200),
+			.orderBy(sql`por_telefono DESC`)
+			.limit(LIMITE_FILAS),
 		db
 			.selectDistinct({
 				...columnasCredito,
 				personaNombre: coDebtors.fullName,
 				personaTelefono: telefonosCodeudorSql,
+				porTelefono: porTelefono(telefonosCodeudorSql, telefonos),
 			})
 			.from(coDebtors)
 			.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
@@ -237,7 +313,8 @@ async function buscarFilas(
 					),
 				),
 			)
-			.limit(200),
+			.orderBy(sql`por_telefono DESC`)
+			.limit(LIMITE_FILAS),
 	]);
 
 	const vehiculo = (f: {
@@ -250,8 +327,17 @@ async function buscarFilas(
 			? { marca: f.marca, modelo: f.modelo, anio: f.anio, placa: f.placa }
 			: null;
 
+	// Solo filas de la oportunidad canónica de cada SIFCO.
+	const canonicas = await oportunidadesCanonicas(
+		[...titulares, ...codeudores].map((f) => f.numeroSifco ?? ""),
+	);
+	const esCanonica = (f: {
+		numeroSifco: string | null;
+		opportunityId: string;
+	}) => canonicas.get(f.numeroSifco ?? "") === f.opportunityId;
+
 	return [
-		...titulares.map((f) => ({
+		...titulares.filter(esCanonica).map((f) => ({
 			numeroSifco: f.numeroSifco ?? "",
 			rol: "titular" as const,
 			personaNombre: limpiarNombre(String(f.titularNombre ?? "")),
@@ -259,7 +345,7 @@ async function buscarFilas(
 			titularNombre: limpiarNombre(String(f.titularNombre ?? "")),
 			vehiculo: vehiculo(f),
 		})),
-		...codeudores.map((f) => ({
+		...codeudores.filter(esCanonica).map((f) => ({
 			numeroSifco: f.numeroSifco ?? "",
 			rol: "codeudor" as const,
 			personaNombre: limpiarNombre(f.personaNombre),

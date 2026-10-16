@@ -184,6 +184,8 @@ export const cobrosAppRouter = {
 	getFichaComplementos: fichaCobrosRouter.getFichaComplementos,
 	getAlertasLeidasCaso: fichaCobrosRouter.getAlertasLeidasCaso,
 	marcarAlertaCasoLeida: fichaCobrosRouter.marcarAlertaCasoLeida,
+	getCreditosRelacionados: fichaCobrosRouter.getCreditosRelacionados,
+	getResumenCreditoRelacionado: fichaCobrosRouter.getResumenCreditoRelacionado,
 	// Workspace de cobros (issue #1873): solicitudes que se deciden en la bandeja.
 	solicitarRebajaMora: solicitudesWorkspaceRouter.solicitarRebajaMora,
 	getSolicitudesRebajaMora: solicitudesWorkspaceRouter.getSolicitudesRebajaMora,

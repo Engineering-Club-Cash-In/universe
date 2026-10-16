@@ -56,6 +56,7 @@ import {
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { CuentaNexa } from "@/components/cobros/cuenta-nexa";
+import { CardCreditosRelacionados } from "@/components/cobros/ficha/creditos-relacionados";
 import { DocumentosCaso } from "@/components/cobros/ficha/documentos-caso";
 import { EstadoCuentaAcciones } from "@/components/cobros/ficha/estado-cuenta-acciones";
 import {
@@ -3233,6 +3234,9 @@ function RouteComponent() {
 									}
 									vencimiento={seguroFicha.vencimiento ?? undefined}
 								/>
+								{casoDetails.data?.id ? (
+									<CardCreditosRelacionados casoCobroId={casoDetails.data.id} />
+								) : null}
 							</div>
 						</div>
 					)}

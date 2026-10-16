@@ -1513,9 +1513,14 @@ async function registrarCoincidenciasCarteraSinCola(
 				}));
 			}
 		}
-		// Identidades que el cliente de Cartera ya no lista: se retiran sus
-		// fuentes de ese usuario y, si la ficha queda sin evidencia, se retira.
-		for (const { personaId, usuarioId } of retirosPorIdentidad) {
+		// Retira las fuentes de un usuario de Cartera de una ficha automática y,
+		// si la ficha queda sin evidencia, la retira.
+		const retirarFuentesAutomaticasDeUsuario = async (
+			personaId: string,
+			usuarioId: number,
+			motivo: string,
+			motivoDesactivacion: string,
+		) => {
 			await tx
 				.delete(buroInternoFuentesCartera)
 				.where(
@@ -1530,7 +1535,7 @@ async function registrarCoincidenciasCarteraSinCola(
 				personaId,
 				detalle: {
 					usuariosCarteraId: [usuarioId],
-					motivo: "identidad_no_figura_en_cartera",
+					motivo,
 				},
 			});
 			await invalidarAutorizacionesPorCambioAutomatico(tx, personaId, [
@@ -1551,8 +1556,7 @@ async function registrarCoincidenciasCarteraSinCola(
 					.set({
 						activo: false,
 						desactivadoAt: ahora,
-						motivoDesactivacion:
-							"La identidad ya no figura en el cliente de Cartera.",
+						motivoDesactivacion,
 						updatedAt: ahora,
 					})
 					.where(
@@ -1573,7 +1577,7 @@ async function registrarCoincidenciasCarteraSinCola(
 						"retiro_automatico",
 					]);
 				}
-				continue;
+				return;
 			}
 			const resumen = resumirFuentesRiesgo(fuentesRestantes);
 			await tx
@@ -1588,6 +1592,16 @@ async function registrarCoincidenciasCarteraSinCola(
 						),
 					),
 				);
+		};
+		// Identidades que el cliente de Cartera ya no lista: se retiran sus
+		// fuentes de ese usuario y, si la ficha queda sin evidencia, se retira.
+		for (const { personaId, usuarioId } of retirosPorIdentidad) {
+			await retirarFuentesAutomaticasDeUsuario(
+				personaId,
+				usuarioId,
+				"identidad_no_figura_en_cartera",
+				"La identidad ya no figura en el cliente de Cartera.",
+			);
 		}
 		const personasProcesadas = new Set<string>();
 		const personasProcesadasPorUsuario = new Set<string>();
@@ -1742,6 +1756,30 @@ async function registrarCoincidenciasCarteraSinCola(
 			) {
 				continue;
 			}
+			// La ficha manual tiene precedencia: si una automática ya guardada
+			// representa esta identidad, deja de contar con la evidencia de este
+			// usuario, para no quedar activa con datos viejos ni conservar
+			// autorizaciones que ya no corresponden.
+			const cederAFichaManual = async () => {
+				if (!personaExistente) return;
+				const [fuenteUsuario] = await tx
+					.select({ personaId: buroInternoFuentesCartera.personaId })
+					.from(buroInternoFuentesCartera)
+					.where(
+						and(
+							eq(buroInternoFuentesCartera.personaId, personaExistente.id),
+							eq(buroInternoFuentesCartera.carteraUsuarioId, usuarioId),
+						),
+					)
+					.limit(1);
+				if (!fuenteUsuario) return;
+				await retirarFuentesAutomaticasDeUsuario(
+					personaExistente.id,
+					usuarioId,
+					"precedencia_ficha_manual",
+					"Una ficha manual de Cobros tiene precedencia sobre este registro automático.",
+				);
+			};
 			const fichaManual = (
 				await tx
 					.select({ persona: buroInternoPersonas })
@@ -1755,7 +1793,10 @@ async function registrarCoincidenciasCarteraSinCola(
 					.orderBy(desc(buroInternoPersonas.createdAt))
 					.limit(1)
 			)[0]?.persona ?? null;
-			if (esFichaManual(fichaManual)) continue;
+			if (esFichaManual(fichaManual)) {
+				await cederAFichaManual();
+				continue;
+			}
 
 			const buscarDuplicadoActivo = async () =>
 				(
@@ -1778,7 +1819,10 @@ async function registrarCoincidenciasCarteraSinCola(
 			// La precedencia manual se comprueba también al reactivar y ante una
 			// identidad compartida por varios usuarios de Cartera.
 			let duplicadoActivo = await buscarDuplicadoActivo();
-			if (esFichaManualActiva(duplicadoActivo)) continue;
+			if (esFichaManualActiva(duplicadoActivo)) {
+				await cederAFichaManual();
+				continue;
+			}
 			let vinculadaAExistente = false;
 			if (
 				duplicadoActivo?.origen === "automatico_cartera" &&

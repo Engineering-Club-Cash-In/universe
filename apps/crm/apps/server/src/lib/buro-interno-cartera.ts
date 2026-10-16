@@ -100,7 +100,7 @@ const VERBO_ESTADO_NEGADO = new RegExp(
 );
 // Acepta un artículo y un sujeto antes del término: "no se detectó el fraude", "no era un cliente moroso".
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido)|\\s+haber\\s+(?:tenido|presentado|registrado|reportado|mostrado|existido|habido))?|libre\\s+de|ausencia\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?(?:\\s+(?:cliente|clienta|clientes|deudor|deudora|deudores|titular|titulares|persona|personas))?\\s+$`,
+	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido)|\\s+haber\\s+(?:tenido|presentado|registrado|reportado|mostrado|existido|habido|detectado|identificado|confirmado|comprobado|evidenciado|observado|encontrado))?|libre\\s+de|ausencia\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?(?:\\s+(?:cliente|clienta|clientes|deudor|deudora|deudores|titular|titulares|persona|personas))?\\s+$`,
 );
 const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni\\s+$`,

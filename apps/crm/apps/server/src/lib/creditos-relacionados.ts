@@ -17,13 +17,6 @@ import { ganaComoCasoVigente } from "./caso-vigente";
 /** Tope de créditos que se devuelven a la ficha. */
 export const LIMITE_CREDITOS_RELACIONADOS = 20;
 
-/**
- * Tope de candidatos a los que se les revisa el acceso en cartera: los de
- * teléfono van primero y nunca se filtran, así que alcanza para llenar la card
- * sin consultar cartera por cientos de homónimos.
- */
-export const LIMITE_CANDIDATOS_ACCESO = 100;
-
 /** Nombres con menos palabras no se buscan: «Juan» solo trae medio país. */
 const PALABRAS_MINIMAS_NOMBRE = 2;
 

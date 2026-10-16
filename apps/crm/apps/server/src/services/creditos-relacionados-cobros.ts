@@ -37,7 +37,6 @@ import {
 	consolidarCreditosRelacionados,
 	type FilaPersonaEnCredito,
 	filtrarPorAccesoYTopar,
-	LIMITE_CANDIDATOS_ACCESO,
 	limpiarNombre,
 	resolverCreditosCanonicos,
 	type Semillas,
@@ -574,25 +573,19 @@ export async function buscarCreditosRelacionados(params: {
 	userId: string;
 	userRole: string;
 }): Promise<CreditoRelacionado[]> {
-	const base = (await buscarCreditosRelacionadosBase(params.ctx)).slice(
-		0,
-		LIMITE_CANDIDATOS_ACCESO,
-	);
+	// Sin tope antes de autorizar: cualquier corte previo puede dejar fuera
+	// un homónimo que el usuario sí puede abrir. Los candidatos ya vienen
+	// acotados por el tope de filas de cada consulta, y el dueño en cartera se
+	// pide por lote.
+	const base = await buscarCreditosRelacionadosBase(params.ctx);
 	if (base.length === 0) return [];
 	const sifcos = base.map((c) => c.numeroSifco);
 
-	const [duenos, estados] = await Promise.all([
-		tolerar(
-			"dueños en cartera",
-			duenosEnCarteraPorSifco(sifcos),
-			new Map<string, { asesorId: number; nombre: string }>(),
-		),
-		tolerar(
-			"buckets",
-			estadosPorSifco(sifcos),
-			new Map<string, EstadoCarteraRelacionado>(),
-		),
-	]);
+	const duenos = await tolerar(
+		"dueños en cartera",
+		duenosEnCarteraPorSifco(sifcos),
+		new Map<string, { asesorId: number; nombre: string }>(),
+	);
 	// Falla cerrado: si cartera no confirma el dueño, se ve en el modal.
 	const permitidos = await tolerar(
 		"acceso",
@@ -605,14 +598,23 @@ export async function buscarCreditosRelacionados(params: {
 		new Set<string>() as Set<string> | null,
 	);
 
-	return filtrarPorAccesoYTopar(
+	const visibles = filtrarPorAccesoYTopar(
 		base.map((c) => ({
 			...c,
 			puedeAbrir: permitidos === null || permitidos.has(c.numeroSifco),
 			asesorNombre: duenos.get(c.numeroSifco)?.nombre ?? null,
-			estado: estados.get(c.numeroSifco) ?? null,
 		})),
 	);
+	// El bucket es solo para pintar: se pide únicamente para lo que se muestra.
+	const estados = await tolerar(
+		"buckets",
+		estadosPorSifco(visibles.map((c) => c.numeroSifco)),
+		new Map<string, EstadoCarteraRelacionado>(),
+	);
+	return visibles.map((c) => ({
+		...c,
+		estado: estados.get(c.numeroSifco) ?? null,
+	}));
 }
 
 export type ResumenCreditoRelacionado = {

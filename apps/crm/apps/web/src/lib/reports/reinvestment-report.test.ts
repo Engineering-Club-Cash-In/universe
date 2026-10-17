@@ -1173,6 +1173,70 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 	).toMatchObject({ Campo: "Contrato Inversión", Valor: 4 });
 });
 
+test("la mora pendiente del mes en curso sale como Pendiente en la fila y en el total de Cobranza", () => {
+	const base = {
+		cuotas_count: 2,
+		total_cuota: "100.00",
+		total_interes: "10.00",
+		total_iva: "1.20",
+		total_seguro: "3.00",
+		total_gps: "4.00",
+		total_membresias: "5.00",
+		total_mora: "0",
+		mora_count: 1,
+		total_credits: 2,
+		credits_con_mora: 1,
+		acum_total_cuota: "100.00",
+		acum_total_interes: "10.00",
+		acum_total_iva: "1.20",
+		acum_total_seguro: "3.00",
+		acum_total_gps: "4.00",
+		acum_total_membresias: "5.00",
+		total_interes_inversionista: "7.00",
+		acum_total_interes_inversionista: "7.00",
+		capital_inv_participacion_actual: "40.00",
+		capital_cube_participacion_actual: "60.00",
+		interes_iva_inv_participacion_actual: "4.48",
+		interes_iva_cube_participacion_actual: "6.72",
+		acum_capital_inv_participacion_actual: "40.00",
+		acum_capital_cube_participacion_actual: "60.00",
+		acum_interes_iva_inv_participacion_actual: "4.48",
+		acum_interes_iva_cube_participacion_actual: "6.72",
+		creditos_participacion_invalida: 0,
+		cuotas_participacion_invalida: 0,
+		participacion_actual: true,
+	};
+	const julio = { ...base, bucket: "2026-07-01", total_mora: "6.00" };
+	const octubre = {
+		...base,
+		bucket: "2026-10-01",
+		total_mora: "0",
+		mora_pendiente: true,
+	};
+	const workbook = buildAdminReportsWorkbook({
+		cobranza: { acumulado: false, rows: [julio, octubre] },
+		reinvestment: response(),
+		metadata: {
+			cobranzaPeriodo: "Octubre 2026",
+			inversionPeriodo: "Octubre 2026",
+			generatedAt: "2026-10-16T12:00:00.000Z",
+		},
+	});
+	const cobranza = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+		workbook.Sheets.Cobranza,
+	);
+
+	expect(cobranza[0]).toMatchObject({ Período: "2026-07-01", "Total mora": 6 });
+	expect(cobranza[1]).toMatchObject({
+		Período: "2026-10-01",
+		"Total mora": "Pendiente",
+	});
+	expect(cobranza.at(-1)).toMatchObject({
+		Período: "Total",
+		"Total mora": "Pendiente",
+	});
+});
+
 test("workbook acumulado conserva montos y cuotas del último corte atrasado", () => {
 	const reinvestment = response();
 	const rows = fillMissingMontoACobrarPeriods(

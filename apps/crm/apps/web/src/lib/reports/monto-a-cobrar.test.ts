@@ -131,6 +131,63 @@ test("reemplaza solo la mora del mes operativo con el cierre oficial", () => {
 	expect(septiembre.total_mora).toBe("2467734.59");
 });
 
+test("sin cierre oficial, la mora del mes en curso queda pendiente y los otros meses no cambian", () => {
+	const septiembre = {
+		...montoRow,
+		bucket: "2026-09-01",
+		total_mora: "2467734.59",
+	};
+	const octubre = {
+		...montoRow,
+		bucket: "2026-10-01",
+		total_mora: "2480000.00",
+	};
+
+	const rows = applyOfficialMonthlyMora(
+		[septiembre, octubre],
+		"2026-10",
+		undefined,
+		true,
+	);
+
+	expect(rows[0]).toBe(septiembre);
+	expect(rows[1]?.total_mora).toBe("0");
+	expect(rows[1]?.mora_pendiente).toBe(true);
+});
+
+test("con cierre oficial usa el esperado y no marca pendiente", () => {
+	const octubre = {
+		...montoRow,
+		bucket: "2026-10-01",
+		total_mora: "2480000.00",
+	};
+
+	const rows = applyOfficialMonthlyMora(
+		[octubre],
+		"2026-10",
+		"425169.19",
+		false,
+	);
+
+	expect(rows[0]?.total_mora).toBe("425169.19");
+	expect(rows[0]?.mora_pendiente).toBeUndefined();
+});
+
+test("la vista expone moraPendiente", () => {
+	const view = getMontoACobrarViewRow(
+		{
+			...montoRow,
+			bucket: "2026-10-01",
+			mora_pendiente: true,
+			total_mora: "0",
+		},
+		false,
+	);
+
+	expect(view.moraPendiente).toBe(true);
+	expect(view.totalMora).toBe(0);
+});
+
 test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 	expect(getMontoACobrarViewRow(montoRow, false)).toEqual({
 		cuotas: 2,
@@ -145,6 +202,7 @@ test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 		interesIvaCube: 6.72,
 		facturacion: 18.72,
 		totalMora: 6,
+		moraPendiente: false,
 		total: 123.2,
 	});
 });

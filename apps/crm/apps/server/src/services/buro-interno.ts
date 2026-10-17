@@ -223,6 +223,18 @@ function nombreComparableSql(
 }
 
 /**
+ * Nombre comparable sin puntuación: además de tildes y espacios quita guiones,
+ * puntos y apóstrofos, como `normalizarTexto` del matcher. Solo reconoce una
+ * ficha manual por nombre; no cambia el índice único por SIFCO + nombre.
+ */
+function nombreSinPuntuacionSql(
+	nombres: AnyPgColumn | string,
+	apellidos: AnyPgColumn | string,
+): SQL {
+	return sql`regexp_replace(${sinTildesSql(sql`${nombres} || ${apellidos}`)}, '[^a-z0-9]', '', 'g')`;
+}
+
+/**
  * NIT comparable: sin guiones ni espacios y en mayúsculas. Es la misma
  * normalización de `normalizarNitMatch` y la del índice
  * `buro_interno_personas_nit_activo_uq`.
@@ -1714,17 +1726,18 @@ async function registrarCoincidenciasCarteraSinCola(
 						? sql`${nitComparableSql(buroInternoPersonas.nit)} = ${normalizarNitMatch(candidato.nit)}`
 						: undefined,
 					nombreCandidato.nombres || nombreCandidato.apellidos
-						? sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombreCandidato.nombres, nombreCandidato.apellidos)}`
+						? sql`${nombreSinPuntuacionSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreSinPuntuacionSql(nombreCandidato.nombres, nombreCandidato.apellidos)}`
 						: undefined,
 				];
 			});
 			// La precedencia manual también reconoce el nombre exacto de la
 			// identidad de Cartera: un candidato puede llegar a ella solo por una
-			// regla de familia, sin una coincidencia de identidad propia.
+			// regla de familia, sin una coincidencia de identidad propia. La
+			// comparación por nombre ignora la puntuación, como el matcher.
 			const condicionFichaManual = or(
 				condicionIdentidad,
 				...condicionesCandidato,
-				sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombresFuente, apellidosFuente)}`,
+				sql`${nombreSinPuntuacionSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreSinPuntuacionSql(nombresFuente, apellidosFuente)}`,
 			);
 			// Un usuario de Cartera puede representar varias personas separadas por
 			// `/`. La ficha existente se busca por la identidad actual, no por el

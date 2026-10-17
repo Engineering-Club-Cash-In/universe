@@ -110,7 +110,7 @@ const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas|tampoco)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni(?:(?:\\s+se)?\\s+(?:${VERBO_ESTADO_NEGADO.source}|${VERBO_ESTADO_EN.source}\\s+en))?(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
 );
 const TERMINO_EVIDENCIA_NEGADA =
-	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?|registros?|riesgos?)/;
+	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?|registros?|riesgos?|casos?|tipos?|situacion(?:es)?|eventos?|incidentes?|episodios?)/;
 const CALIFICADOR_EVIDENCIA_NEGADA =
 	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?|negativ[oa]s?|desfavorables?|adversos?|adversas?|previos?|previas?)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(
@@ -119,9 +119,9 @@ const PREFIJO_NEGACION_INDIRECTA = new RegExp(
 const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;
 const PREFIJO_PROBLEMAS_NEGADOS =
-	/(?:^|\s)(?:(?:no|nunca|jamas|tampoco)\s+(?:tiene|tenia|tuvo|presenta|presentaba|presento|hay|habia|hubo|existen?|existia(?:n)?|registra|registraba|reporta|reportaba|(?:ha|han|habia|habian)\s+(?:tenido|presentado|habido))\s+(?:ningun[ao]?\s+)?|ningun[ao]?\s+)problemas?\s+de\s+$/;
+	/(?:^|\s)(?:(?:no|nunca|jamas|tampoco)\s+(?:tiene|tenia|tuvo|presenta|presentaba|presento|hay|habia|hubo|existen?|existia(?:n)?|registra|registraba|reporta|reportaba|tienen|tenian|tuvieron|presentan|presentaban|presentaron|registran|registraban|reportan|reportaban|(?:ha|han|habia|habian)\s+(?:tenido|presentado|habido))\s+(?:ningun[ao]?\s+)?|ningun[ao]?\s+)problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
-	/(?:^|\s)(?:sin|(?:no|nunca|jamas|tampoco)(?:\s+(?:se\s+)?(?:tiene|tenia|tuvo|hay|habia|hubo|existe(?:n)?|existia(?:n)?|presenta|presentaba|presento|cuenta\s+con|contaba\s+con|posee|poseia|adeuda|adeudaba|debe|debia|registra|registraba|reporta|reportaba|mantiene|mantenia))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
+	/(?:^|\s)(?:sin|(?:no|nunca|jamas|tampoco)(?:\s+(?:se\s+)?(?:tiene|tenia|tuvo|hay|habia|hubo|existe(?:n)?|existia(?:n)?|presenta|presentaba|presento|cuenta\s+con|contaba\s+con|posee|poseia|adeuda|adeudaba|debe|debia|registra|registraba|reporta|reportaba|mantiene|mantenia|tienen|tenian|tuvieron|presentan|presentaban|presentaron|cuentan\s+con|contaban\s+con|poseen|poseian|adeudan|adeudaban|deben|debian|registran|registraban|reportan|reportaban|mantienen|mantenian))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
 const PREFIJO_ESTADO_EN_NEGADO = new RegExp(
 	`(?:^|\\s)(?:(?:no|nunca|jamas|tampoco)(?:\\s+se)?\\s+${VERBO_ESTADO_EN.source}|sin\\s+(?:haber\\s+)?(?:estar|estado|caer|caido|incurrir|incurrido|entrar|entrado))\\s+en\\s+$`,
 );

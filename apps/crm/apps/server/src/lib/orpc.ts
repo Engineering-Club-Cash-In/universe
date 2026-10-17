@@ -647,6 +647,34 @@ const requireVehicleAccess = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireAgencyManagement = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!userRole || !PERMISSIONS.canManageAgencies(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Solo admin o supervisor de ventas administran agencias",
+		});
+	}
+
+	return next({
+		context: {
+			...context,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireViewInvestorContracts = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -850,6 +878,9 @@ export const viewInvestorContractsProcedure = publicProcedure.use(
 );
 export const tallerProcedure = publicProcedure.use(requireTallerAccess);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
+export const agencyManagementProcedure = publicProcedure.use(
+	requireAgencyManagement,
+);
 export const vehiclesProcedure = publicProcedure.use(requireVehicleAccess);
 export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(

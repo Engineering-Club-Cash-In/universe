@@ -540,9 +540,14 @@ function RouteComponent() {
 												<p className="mt-1 text-muted-foreground text-xs">
 													{user.agencias.length
 														? user.agencias
-																.map((a) =>
-																	a.vendedor ? `${a.nombre} (${a.vendedor})` : a.nombre,
-																)
+																.map((a) => {
+																	const etiqueta = a.vendedor
+																		? `${a.nombre} (${a.vendedor})`
+																		: a.nombre;
+																	return a.activa
+																		? etiqueta
+																		: `${etiqueta} — desactivada en esta agencia`;
+																})
 																.join(", ")
 														: "Sin agencias asignadas"}
 												</p>

@@ -1,8 +1,32 @@
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, mock, test } from "bun:test";
 
 mock.module("../db", () => ({ db: {} }));
 
-const { casoDentroDeAlcance } = await import("./partner-scope");
+const { casoDentroDeAlcance, resolvePartnerScope } = await import("./partner-scope");
+
+describe("resolvePartnerScope", () => {
+	function conexionQueCapturaElWhere() {
+		const capturado: { sql: string } = { sql: "" };
+		const nodo = {
+			from: () => nodo,
+			where: (condicion: unknown) => {
+				capturado.sql = new PgDialect().sqlToQuery(condicion as never).sql;
+				return Promise.resolve([{ companyId: "agencia-1", sellerId: null }]);
+			},
+		};
+		return { capturado, conexion: { select: () => nodo } as never };
+	}
+
+	test("solo pide las membresías activas (desactivado_at IS NULL) del usuario", async () => {
+		const { capturado, conexion } = conexionQueCapturaElWhere();
+
+		await resolvePartnerScope("socio-1", conexion);
+
+		expect(capturado.sql).toContain('"desactivado_at" is null');
+		expect(capturado.sql).toContain('"user_id" = $');
+	});
+});
 
 describe("casoDentroDeAlcance", () => {
 	const gerente = [{ companyId: "agencia-1", sellerId: null }];

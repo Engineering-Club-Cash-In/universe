@@ -1,4 +1,4 @@
-import { and, eq, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, isNull, or, type SQL, sql } from "drizzle-orm";
 import { db } from "../db";
 import { opportunities } from "../db/schema/crm";
 import {
@@ -20,7 +20,13 @@ export async function resolvePartnerScope(
 			sellerId: partnerMembers.sellerId,
 		})
 		.from(partnerMembers)
-		.where(eq(partnerMembers.userId, userId));
+		.where(
+			and(
+				eq(partnerMembers.userId, userId),
+				// Una membresía desactivada no cuenta: es la única fuente del alcance.
+				isNull(partnerMembers.desactivadoAt),
+			),
+		);
 
 	return rows.map((row) => ({
 		companyId: row.companyId,

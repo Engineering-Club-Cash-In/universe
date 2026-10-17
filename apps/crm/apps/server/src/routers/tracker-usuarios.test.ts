@@ -215,7 +215,11 @@ describe("montaje en partnerTrackerRouter", () => {
 		}
 	});
 
-	test("la superficie de tracker-usuarios es exactamente getMiPerfil", () => {
-		expect(Object.keys(trackerUsuariosRouter).sort()).toEqual(["getMiPerfil"]);
+	test("la superficie de tracker-usuarios son getMiPerfil y las dos lecturas", () => {
+		expect(Object.keys(trackerUsuariosRouter).sort()).toEqual([
+			"getMiPerfil",
+			"getUsuarioDeMiAgencia",
+			"getUsuariosDeMiAgencia",
+		]);
 	});
 });

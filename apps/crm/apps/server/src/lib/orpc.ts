@@ -818,7 +818,7 @@ const requirePartnerIdentity = o.middleware(async ({ context, next }) => {
 	return next({ context: await contextoDeSocio(context) });
 });
 
-const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+async function contextoDeSocioConAcceso(context: Context) {
 	const partnerContext = await contextoDeSocio(context);
 	if (partnerContext.companyIds.length === 0) {
 		throw new ORPCError("FORBIDDEN", {
@@ -831,7 +831,26 @@ const requirePartnerAccess = o.middleware(async ({ context, next }) => {
 		});
 	}
 
-	return next({ context: partnerContext });
+	return partnerContext;
+}
+
+const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+	return next({ context: await contextoDeSocioConAcceso(context) });
+});
+
+// Gerente = ≥1 membresía ACTIVA sin vendedor (`sellerId` null). Se decide por
+// agencia, no por cuenta: `agenciasGerente` es todo su alcance de administración.
+const requirePartnerManager = o.middleware(async ({ context, next }) => {
+	const partnerContext = await contextoDeSocioConAcceso(context);
+	const agenciasGerente = partnerContext.membresias
+		.filter((m) => m.sellerId === null)
+		.map((m) => m.companyId);
+	if (agenciasGerente.length === 0) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Solo el gerente de la agencia puede administrar usuarios",
+		});
+	}
+	return next({ context: { ...partnerContext, agenciasGerente } });
 });
 
 export const protectedProcedure = publicProcedure.use(requireAuth);
@@ -890,3 +909,6 @@ export const partnerIdentityProcedure = publicProcedure.use(
 	requirePartnerIdentity,
 );
 export const partnerProcedure = publicProcedure.use(requirePartnerAccess);
+export const partnerManagerProcedure = publicProcedure.use(
+	requirePartnerManager,
+);

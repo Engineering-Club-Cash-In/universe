@@ -1,7 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { randomInt } from "node:crypto";
 import { APIError } from "better-auth/api";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -421,4 +421,330 @@ export async function agregarMembresia(userId: string, membresia: MembresiaInput
 			sellerId: membresia.sellerId,
 		});
 	});
+}
+
+async function exigirSocio(tx: Tx, userId: string) {
+	const [objetivo] = await tx
+		.select({ role: user.role })
+		.from(user)
+		.where(eq(user.id, userId))
+		// Mismo candado que asignarAgencias/updateUserRole: sin él, un reemplazo de
+		// agencias en curso pisaría la desactivación o el nombre que se escribe aquí.
+		.for("update")
+		.limit(1);
+	// Un interno (o un id inventado) responde igual que uno inexistente.
+	if (!objetivo || objetivo.role !== ROLES.PARTNER) {
+		throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+	}
+}
+
+/**
+ * Membresías del objetivo tal como las ve `revalidar`: lo que el llamador
+ * necesita para volver a exigir, ya con el candado de `user` tomado, lo que
+ * comprobó antes de abrir la transacción.
+ */
+export type MembresiaRevalidable = {
+	companyId: string;
+	sellerId: string | null;
+	activa: boolean;
+};
+
+/**
+ * Se ejecuta DENTRO de la transacción, después del FOR UPDATE sobre `user`, con
+ * las membresías releídas del objetivo. Si lanza, la transacción aborta sin
+ * escribir: cierra la carrera entre el chequeo del llamador y la escritura
+ * (p. ej. que lo pasen de gerente a vendedor justo entre ambas).
+ */
+export type RevalidarMembresias = (membresias: MembresiaRevalidable[]) => void;
+
+function comoRevalidables(
+	filas: { companyId: string; sellerId: string | null; desactivadoAt: Date | null }[],
+): MembresiaRevalidable[] {
+	return filas.map((m) => ({
+		companyId: m.companyId,
+		sellerId: m.sellerId,
+		activa: m.desactivadoAt === null,
+	}));
+}
+
+/**
+ * Activa o desactiva al socio SOLO en esa agencia; sus otras agencias no se
+ * tocan. Solo opera sobre socios (`partner`) con membresía en la agencia.
+ * Desactivar a quien ya está inactivo no hace nada: conserva quién y cuándo lo
+ * desactivó la primera vez. Devuelve true solo si la fila cambió de estado.
+ */
+export async function cambiarEstadoMembresia(
+	userId: string,
+	companyId: string,
+	activa: boolean,
+	actorId: string,
+	revalidar?: RevalidarMembresias,
+): Promise<boolean> {
+	return db.transaction(async (tx) => {
+		await exigirSocio(tx, userId);
+		const membresias = await tx
+			.select({
+				companyId: partnerMembers.companyId,
+				sellerId: partnerMembers.sellerId,
+				desactivadoAt: partnerMembers.desactivadoAt,
+			})
+			.from(partnerMembers)
+			.where(eq(partnerMembers.userId, userId));
+		if (!membresias.some((m) => m.companyId === companyId)) {
+			throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+		}
+		revalidar?.(comoRevalidables(membresias));
+
+		const cambiadas = await tx
+			.update(partnerMembers)
+			.set(
+				activa
+					? { desactivadoAt: null, desactivadoPor: null }
+					: { desactivadoAt: new Date(), desactivadoPor: actorId },
+			)
+			.where(
+				and(
+					eq(partnerMembers.userId, userId),
+					eq(partnerMembers.companyId, companyId),
+					// Simétrico: solo cambia lo que de verdad cambia de estado. Una
+					// fila que ya estaba en ese estado no se toca (no se pisa quién ni
+					// cuándo desactivó) y no cuenta como cambio.
+					activa
+						? isNotNull(partnerMembers.desactivadoAt)
+						: isNull(partnerMembers.desactivadoAt),
+				),
+			)
+			.returning({ id: partnerMembers.id });
+		return cambiadas.length > 0;
+	});
+}
+
+/**
+ * El nombre es único por cuenta: se escribe en `user` y en todos sus
+ * vendedores para que el CRM no se desfase. El teléfono va solo en el vendedor
+ * de `companyId`.
+ */
+export async function actualizarDatosSocio(
+	userId: string,
+	datos: { nombre?: string; telefono?: string },
+	companyId: string,
+	revalidar?: RevalidarMembresias,
+): Promise<void> {
+	await db.transaction(async (tx) => {
+		await exigirSocio(tx, userId);
+		const membresias = await tx
+			.select({
+				companyId: partnerMembers.companyId,
+				sellerId: partnerMembers.sellerId,
+				desactivadoAt: partnerMembers.desactivadoAt,
+			})
+			.from(partnerMembers)
+			.where(eq(partnerMembers.userId, userId));
+		revalidar?.(comoRevalidables(membresias));
+		const enAgencia = membresias.find((m) => m.companyId === companyId);
+		if (!enAgencia) {
+			throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+		}
+
+		const nombre = datos.nombre?.trim();
+		if (nombre) {
+			await tx
+				.update(user)
+				.set({ name: nombre, updatedAt: new Date() })
+				.where(eq(user.id, userId));
+			const vendedores = membresias
+				.map((m) => m.sellerId)
+				.filter((id): id is string => !!id);
+			if (vendedores.length > 0) {
+				await tx
+					.update(vehicleVendors)
+					.set({ name: nombre })
+					.where(inArray(vehicleVendors.id, vendedores));
+			}
+		}
+
+		if (datos.telefono !== undefined) {
+			if (!enAgencia.sellerId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este usuario no tiene teléfono que editar en esa agencia",
+				});
+			}
+			await tx
+				.update(vehicleVendors)
+				.set({ phone: datos.telefono.trim() || null })
+				.where(eq(vehicleVendors.id, enAgencia.sellerId));
+		}
+	});
+}
+
+export type SocioDeAgencia = {
+	id: string;
+	nombre: string;
+	correo: string;
+	cuentaSuspendida: boolean;
+	creadoEn: Date;
+	membresias: {
+		companyId: string;
+		companyNombre: string;
+		sellerId: string | null;
+		telefono: string | null;
+		activa: boolean;
+	}[];
+};
+
+/**
+ * Socios con membresía en alguna de estas agencias, con TODAS sus membresías
+ * (las necesita permisosDelGerente). Todo lo que salga al tracker debe pasar
+ * por recortarAlAlcance.
+ */
+export async function listarSociosDeAgencias(
+	companyIds: string[],
+): Promise<SocioDeAgencia[]> {
+	if (companyIds.length === 0) return [];
+
+	const ids = await db
+		.select({ userId: partnerMembers.userId })
+		.from(partnerMembers)
+		.innerJoin(user, eq(user.id, partnerMembers.userId))
+		.where(
+			and(
+				inArray(partnerMembers.companyId, companyIds),
+				eq(user.role, ROLES.PARTNER),
+			),
+		);
+	if (ids.length === 0) return [];
+	const userIds = [...new Set(ids.map((i) => i.userId))];
+
+	const filas = await db
+		.select({
+			userId: user.id,
+			nombre: user.name,
+			correo: user.email,
+			banned: user.banned,
+			creadoEn: user.createdAt,
+			companyId: partnerMembers.companyId,
+			companyNombre: companies.name,
+			sellerId: partnerMembers.sellerId,
+			telefono: vehicleVendors.phone,
+			desactivadoAt: partnerMembers.desactivadoAt,
+		})
+		.from(partnerMembers)
+		.innerJoin(user, eq(user.id, partnerMembers.userId))
+		.innerJoin(companies, eq(companies.id, partnerMembers.companyId))
+		.leftJoin(vehicleVendors, eq(vehicleVendors.id, partnerMembers.sellerId))
+		.where(
+			and(
+				inArray(partnerMembers.userId, userIds),
+				eq(user.role, ROLES.PARTNER),
+			),
+		)
+		.orderBy(asc(user.name), asc(companies.name));
+
+	// Entre una consulta y otra el socio pudo quedar sin membresías en estas
+	// agencias (o dejar de ser socio): solo salen los que aún tienen al menos una.
+	const alcance = new Set(companyIds);
+	const enAlcance = new Set(
+		filas.filter((f) => alcance.has(f.companyId)).map((f) => f.userId),
+	);
+
+	const porUsuario = new Map<string, SocioDeAgencia>();
+	for (const f of filas) {
+		if (!enAlcance.has(f.userId)) continue;
+		let socio = porUsuario.get(f.userId);
+		if (!socio) {
+			socio = {
+				id: f.userId,
+				nombre: f.nombre,
+				correo: f.correo,
+				cuentaSuspendida: f.banned === true,
+				creadoEn: f.creadoEn,
+				membresias: [],
+			};
+			porUsuario.set(f.userId, socio);
+		}
+		socio.membresias.push({
+			companyId: f.companyId,
+			companyNombre: f.companyNombre,
+			sellerId: f.sellerId,
+			telefono: f.telefono ?? null,
+			activa: f.desactivadoAt === null,
+		});
+	}
+	return [...porUsuario.values()];
+}
+
+export type PermisosDelGerente = {
+	porAgencia: Record<
+		string,
+		{ puedeActivar: boolean; puedeEditarTelefono: boolean; motivo?: string }
+	>;
+	puedeEditarNombre: boolean;
+	motivoNombre?: string;
+};
+
+/**
+ * Regla §2.3, pura. Por agencia del gerente donde el objetivo tiene membresía:
+ * activar y editar teléfono solo si es vendedor ahí y no es el mismo gerente.
+ * El nombre es único por cuenta: solo si TODAS sus membresías son de vendedor
+ * y caen dentro de las agencias del gerente. Los motivos son genéricos: nunca
+ * nombran otra agencia.
+ */
+export function permisosDelGerente(
+	gerenteId: string,
+	agenciasGerente: string[],
+	objetivo: SocioDeAgencia,
+): PermisosDelGerente {
+	const esElMismo = objetivo.id === gerenteId;
+	const porAgencia: PermisosDelGerente["porAgencia"] = {};
+
+	for (const m of objetivo.membresias) {
+		if (!agenciasGerente.includes(m.companyId)) continue;
+		if (esElMismo) {
+			porAgencia[m.companyId] = {
+				puedeActivar: false,
+				puedeEditarTelefono: false,
+				motivo: "No puedes modificar tu propia cuenta",
+			};
+		} else if (m.sellerId === null) {
+			porAgencia[m.companyId] = {
+				puedeActivar: false,
+				puedeEditarTelefono: false,
+				motivo: "Es gerente de esta agencia; lo administra Club Cash In",
+			};
+		} else {
+			porAgencia[m.companyId] = { puedeActivar: true, puedeEditarTelefono: true };
+		}
+	}
+
+	let puedeEditarNombre = true;
+	let motivoNombre: string | undefined;
+	if (esElMismo) {
+		puedeEditarNombre = false;
+		motivoNombre = "No puedes modificar tu propia cuenta";
+	} else if (
+		objetivo.membresias.some((m) => !agenciasGerente.includes(m.companyId))
+	) {
+		// Primero lo ajeno: el motivo no puede delatar qué rol tiene en otra agencia.
+		puedeEditarNombre = false;
+		motivoNombre =
+			"El nombre lo administra Club Cash In porque también trabaja con otra agencia";
+	} else if (objetivo.membresias.some((m) => m.sellerId === null)) {
+		puedeEditarNombre = false;
+		motivoNombre = "Es gerente; lo administra Club Cash In";
+	}
+
+	return { porAgencia, puedeEditarNombre, motivoNombre };
+}
+
+/** §2.4: quita las membresías de agencias que no son del gerente. */
+export function recortarAlAlcance(
+	socio: SocioDeAgencia,
+	agenciasGerente: string[],
+): SocioDeAgencia {
+	return {
+		...socio,
+		membresias: socio.membresias.filter((m) =>
+			agenciasGerente.includes(m.companyId),
+		),
+	};
 }

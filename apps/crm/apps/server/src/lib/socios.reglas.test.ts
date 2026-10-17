@@ -88,8 +88,10 @@ mock.module("../db", () => ({
 mock.module("./auth", () => ({ auth: { api: {} } }));
 
 const {
+	buscarCuentaPorCorreo,
 	cambiarEstadoMembresia,
 	actualizarDatosSocio,
+	promoverMembresiaAGerente,
 	listarSociosDeAgencias,
 	permisosDelGerente,
 	recortarAlAlcance,
@@ -326,6 +328,67 @@ describe("cambiarEstadoMembresia", () => {
 			}),
 		).rejects.toThrow("ya no es gerente");
 		expect(updates).toHaveLength(0);
+	});
+});
+
+describe("promoverMembresiaAGerente", () => {
+	test("deja sellerId NULL, reactiva y limpia desactivado_* solo en esa agencia", async () => {
+		await promoverMembresiaAGerente("u1", A);
+		expect(updates).toHaveLength(1);
+		expect(updates[0]?.tabla).toBe(partnerMembers);
+		expect(updates[0]?.valores).toEqual({
+			sellerId: null,
+			desactivadoAt: null,
+			desactivadoPor: null,
+		});
+		const donde = updates[0]?.donde;
+		expect(donde?.sql).toContain('"user_id"');
+		expect(donde?.sql).toContain('"company_id"');
+		expect(donde?.params).toEqual(["u1", A]);
+	});
+
+	test("bloquea la fila de user con FOR UPDATE antes de escribir", async () => {
+		await promoverMembresiaAGerente("u1", A);
+		expect(bloqueosDeUser).toEqual(["update"]);
+	});
+
+	test("un usuario interno da NOT_FOUND y no se actualiza nada", async () => {
+		rolDelUsuario = ROLES.ADMIN;
+		await expect(promoverMembresiaAGerente("u1", A)).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+		expect(updates).toHaveLength(0);
+	});
+
+	test("usuario inexistente da NOT_FOUND y no se actualiza nada", async () => {
+		rolDelUsuario = null;
+		await expect(promoverMembresiaAGerente("u1", A)).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+		expect(updates).toHaveLength(0);
+	});
+
+	test("sin membresía en esa agencia da NOT_FOUND", async () => {
+		membresiaExiste = false;
+		await expect(promoverMembresiaAGerente("u1", A)).rejects.toMatchObject({
+			code: "NOT_FOUND",
+		});
+	});
+});
+
+describe("buscarCuentaPorCorreo", () => {
+	test("busca sin distinguir mayúsculas ni espacios y devuelve la cuenta", async () => {
+		idsListado = [{ id: "u1", role: ROLES.PARTNER }] as never;
+		const r = await buscarCuentaPorCorreo("  Gerente@Agencia.COM ");
+		expect(r).toEqual({ id: "u1", role: ROLES.PARTNER });
+		const q = new PgDialect().sqlToQuery(dondeDelListado as never);
+		expect(q.sql).toContain("lower(");
+		expect(q.params).toEqual(["gerente@agencia.com"]);
+	});
+
+	test("sin cuenta devuelve null", async () => {
+		idsListado = [];
+		expect(await buscarCuentaPorCorreo("nadie@agencia.com")).toBeNull();
 	});
 });
 

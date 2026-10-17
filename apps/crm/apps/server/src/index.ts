@@ -50,6 +50,7 @@ import {
 } from "./lib/partner-auth";
 import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
+import { agencyManagersRouter } from "./routers/agency-managers";
 import { cartaPoderRouter } from "./routers/carta-poder";
 import {
 	appRouter,
@@ -234,6 +235,7 @@ const handler = new RPCHandler(
 		partnerTrackerRouter,
 		buroInternoProcedures,
 		cartaPoderRouter,
+		agencyManagersRouter,
 	),
 );
 app.use("/rpc/*", limiteFacturaSeguro());

@@ -11,6 +11,7 @@ import { adminProcedure } from "../lib/orpc";
 import { ROLES, USER_ROLE_VALUES } from "../lib/roles";
 import {
 	asignarAgencias,
+	crearSocio,
 	membresiaSchema,
 	reemplazarAgencias,
 } from "../lib/socios";
@@ -256,6 +257,18 @@ export const adminRouter = {
 				});
 			}
 
+			// Los socios pasan por el servicio compartido (con compensación); el
+			// admin conserva su comportamiento: acepta cualquier dominio.
+			if (esSocio) {
+				return crearSocio({
+					nombre: input.name,
+					correo: input.email,
+					contrasena: input.password,
+					membresias: agencias,
+					permitirDominioInterno: true,
+				});
+			}
+
 			// Use Better Auth's admin createUser API
 			const result = await auth.api.createUser({
 				body: {
@@ -270,16 +283,6 @@ export const adminRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Error al crear usuario",
 				});
-			}
-
-			if (esSocio) {
-				try {
-					await asignarAgencias(result.user.id, agencias);
-				} catch (error) {
-					// Un socio sin agencias no puede entrar a nada: mejor no dejarlo a medias.
-					await db.delete(user).where(eq(user.id, result.user.id));
-					throw error;
-				}
 			}
 
 			return result.user;

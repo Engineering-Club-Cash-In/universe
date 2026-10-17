@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { crmAuditEntityTypeEnum } from "../db/schema/crm-entity-audit";
 import {
 	type AuditContext,
 	auditFallbackForPath,
@@ -27,6 +28,12 @@ function contextWith(overrides: Partial<AuditContext> = {}): AuditContext {
 
 const OK = { ok: true, durationMs: 12 };
 const FAILED = { ok: false, errorCode: "CONFLICT", durationMs: 12 };
+
+describe("entidades auditables", () => {
+	test("la base acepta partner_member para las altas y cambios de socios", () => {
+		expect(crmAuditEntityTypeEnum.enumValues).toContain("partner_member");
+	});
+});
 
 describe("buildAuditRows", () => {
 	test("writes nothing when a successful handler touched no entity", () => {
@@ -87,6 +94,30 @@ describe("buildAuditRows", () => {
 			OK,
 		);
 		expect(row.input).toEqual({ leadId: "lead-1", nit: "123" });
+	});
+
+	test("an entry with an explicit actor wins over the session's (tracker requests have none)", () => {
+		const rows = buildAuditRows(
+			contextWith({
+				actorId: null,
+				actorRole: null,
+				entries: [
+					{
+						entity: "partner_member",
+						id: "v-1",
+						action: "create",
+						actor: { id: "socio-9", role: "partner" },
+					},
+					{ entity: "partner_member", id: "v-2", action: "update" },
+				],
+			}),
+			OK,
+		);
+		expect(rows[0]).toMatchObject({
+			performedBy: "socio-9",
+			performedByRole: "partner",
+		});
+		expect(rows[1]).toMatchObject({ performedBy: null, performedByRole: null });
 	});
 
 	test("records a failure the handler returned instead of threw", () => {

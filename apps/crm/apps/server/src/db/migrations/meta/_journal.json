@@ -351,6 +351,13 @@
 			"when": 1791562100000,
 			"tag": "0055_partner_members_desactivacion",
 			"breakpoints": true
+		},
+		{
+			"idx": 49,
+			"version": "7",
+			"when": 1791562200000,
+			"tag": "0056_audit_entity_partner_member",
+			"breakpoints": true
 		}
 	]
 }

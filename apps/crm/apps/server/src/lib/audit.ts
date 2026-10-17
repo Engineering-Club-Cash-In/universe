@@ -27,7 +27,11 @@ import type { Context } from "./context";
  *   corrió, no de una etiqueta estática declarada arriba del procedure.
  */
 
-export type AuditEntityType = "lead" | "opportunity" | "vehicle";
+export type AuditEntityType =
+	| "lead"
+	| "opportunity"
+	| "vehicle"
+	| "partner_member";
 export type AuditSource = "crm" | "bot" | "portal" | "public" | "system";
 
 /** Lo que anota un handler: qué tocó y cómo. Nada de quién ni desde dónde. */
@@ -42,6 +46,12 @@ export type AuditEntry = {
 	/** El intento se registró pero no prosperó (fallos devueltos como valor). */
 	ok?: boolean;
 	errorCode?: string | null;
+	/**
+	 * Quién responde, cuando no sale de `context.session`: las requests del
+	 * tracker traen su propia cookie y llegan sin sesión del CRM. Si se omite
+	 * rige el actor de la request.
+	 */
+	actor?: { id: string | null; role: string | null };
 };
 
 export type AuditContext = {
@@ -261,6 +271,9 @@ export function buildAuditRows(
 	// `auditRollback`, que es otro mecanismo.
 	const filas = context.entries.map((entry) => ({
 		...common,
+		...(entry.actor
+			? { performedBy: entry.actor.id, performedByRole: entry.actor.role }
+			: {}),
 		entityType: entry.entity,
 		entityId: entry.id ?? null,
 		action: entry.action,

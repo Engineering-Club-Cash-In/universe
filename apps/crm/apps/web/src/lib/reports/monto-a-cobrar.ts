@@ -8,6 +8,8 @@ export type MontoACobrarParticipacionRow = {
 	total_gps: string;
 	total_membresias: string;
 	total_mora: string;
+	/** El mes en curso sin cierre oficial: su mora proyectada todavía no existe. */
+	mora_pendiente?: boolean;
 	mora_count: number;
 	total_credits: number;
 	credits_con_mora: number;
@@ -55,6 +57,7 @@ export type MontoACobrarViewRow = {
 	interesIvaCube: number;
 	facturacion: number;
 	totalMora: number;
+	moraPendiente: boolean;
 	total: number;
 };
 
@@ -129,13 +132,17 @@ export function applyOfficialMonthlyMora(
 	rows: MontoACobrarParticipacionRow[],
 	operationalMonth: string,
 	expected: string | undefined,
+	// Sin cierre oficial, la mora del mes en curso queda pendiente. El saldo acumulado
+	// de mora (unas 5 veces la proyección) no es lo que esta columna promete para el mes en curso.
+	pendiente = false,
 ) {
-	if (expected === undefined) return rows;
-	return rows.map((row) =>
-		row.bucket.slice(0, 7) === operationalMonth
+	if (expected === undefined && !pendiente) return rows;
+	return rows.map((row) => {
+		if (row.bucket.slice(0, 7) !== operationalMonth) return row;
+		return expected !== undefined
 			? { ...row, total_mora: expected }
-			: row,
-	);
+			: { ...row, total_mora: "0", mora_pendiente: true };
+	});
 }
 
 export function getMontoACobrarViewRow(
@@ -183,6 +190,7 @@ export function getMontoACobrarViewRow(
 		interesIvaCube,
 		facturacion: interesIvaCube + membresias + servicios,
 		totalMora: numeric(row.total_mora),
+		moraPendiente: row.mora_pendiente === true,
 		total: capital + interesIva + servicios + membresias,
 	};
 }

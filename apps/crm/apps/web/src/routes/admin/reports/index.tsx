@@ -553,6 +553,7 @@ function RouteComponent() {
 		),
 		officialMoraOperationalMonth,
 		officialMoraEsperado,
+		officialMoraMissing,
 	);
 
 	const facturacionMesQuery = useQuery({
@@ -849,8 +850,9 @@ function RouteComponent() {
 					inversionPeriodo: `${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`,
 					generatedAt: new Date().toISOString(),
 					...(officialMoraMissing && {
-						avisoMoraMes:
-							"Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera.",
+						avisoMoraMes: officialMoraQuery.isError
+							? "No se pudo cargar el cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente."
+							: "Sin cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente.",
 					}),
 				},
 			});
@@ -860,7 +862,7 @@ function RouteComponent() {
 			);
 			if (officialMoraMissing) {
 				toast.warning(
-					"Se exportó sin la mora oficial del mes; la mora del mes actual es la calculada por cartera.",
+					"Se exportó sin la mora oficial del mes; la mora proyectada del mes actual quedó pendiente.",
 				);
 			}
 		} catch (error) {
@@ -1448,8 +1450,8 @@ function RouteComponent() {
 										<p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 text-sm dark:bg-amber-950/30 dark:text-amber-200">
 											{/* Un fallo de carga no es lo mismo que no tener cierre: decir "sin cierre" invita a reimportarlo. */}
 											{officialMoraQuery.isError
-												? "No se pudo cargar el cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera."
-												: "Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera."}
+												? "No se pudo cargar el cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente."
+												: "Sin cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente hasta que se cargue."}
 										</p>
 									)}
 									{!officialMoraPending &&
@@ -1588,7 +1590,13 @@ function RouteComponent() {
 																{formatCurrency(view.membresias)}
 															</TableCell>
 																<TableCell>
-																<div>{formatCurrency(view.totalMora)}</div>
+																<div>
+																	{view.moraPendiente
+																		? "Pendiente"
+																		: formatCurrency(view.totalMora)}
+																</div>
+																		{/* Junto a "Pendiente" el % se leería como la mora del mes. */}
+																		{!view.moraPendiente && (
 																		<div
 																			className="text-muted-foreground text-xs"
 																			title="% de créditos del período con mora activa"
@@ -1602,6 +1610,7 @@ function RouteComponent() {
 																				: "0.0"}
 																			%
 																		</div>
+																		)}
 																	</TableCell>
 																<TableCell className="font-bold">
 																{formatCurrency(view.total)}
@@ -1707,7 +1716,9 @@ function RouteComponent() {
 																{formatCurrency(membresiasTotal)}
 															</TableCell>
 																<TableCell>
-																{formatCurrency(val("total_mora"))}
+																{rows.some((r) => r.mora_pendiente)
+																	? "Pendiente"
+																	: formatCurrency(val("total_mora"))}
 															</TableCell>
 																<TableCell>
 																{formatCurrency(grandTotal)}

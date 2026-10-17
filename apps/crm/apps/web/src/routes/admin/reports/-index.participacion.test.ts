@@ -147,7 +147,7 @@ test("integra la mora oficial en la tabla existente sin tarjeta adicional", asyn
 	expect(source).toContain("rows: montoCobrarRows");
 });
 
-test("sin mora oficial muestra la tabla con la mora calculada y avisa; la exportación solo espera mientras carga", async () => {
+test("sin mora oficial muestra la tabla con la mora proyectada del mes como Pendiente y avisa; la exportación solo espera mientras carga", async () => {
 	const source = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
 	expect(source).toContain(
 		"enabled: canAccessCobranzaReport && officialMoraRequired",
@@ -159,7 +159,7 @@ test("sin mora oficial muestra la tabla con la mora calculada y avisa; la export
 		/\{!!montoCobrarData\?\.data\.length && !officialMoraPending && officialMoraMissing && \(/,
 	);
 	expect(source).toMatch(
-		/officialMoraQuery\.isError\s*\?\s*"No se pudo cargar el cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera\."\s*:\s*"Sin cierre oficial de Finanzas: la mora del mes actual es la calculada por cartera\."/,
+		/officialMoraQuery\.isError\s*\?\s*"No se pudo cargar el cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente\."\s*:\s*"Sin cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente hasta que se cargue\."/,
 	);
 	expect(source).not.toContain("officialMoraReady");
 	expect(source).not.toContain("officialMoraFailed");
@@ -180,13 +180,24 @@ test("sin mora oficial muestra la tabla con la mora calculada y avisa; la export
 	);
 	expect(exportBlock).toContain("if (officialMoraPending)");
 	expect(source).toMatch(
+		/view\.moraPendiente\s*\?\s*"Pendiente"\s*:\s*formatCurrency\(view\.totalMora\)/,
+	);
+	expect(source).toMatch(
+		/rows\.some\(\(r\) => r\.mora_pendiente\)\s*\?\s*"Pendiente"\s*:\s*formatCurrency\(val\("total_mora"\)\)/,
+	);
+	expect(source).toMatch(
+		/\{!view\.moraPendiente && \(\s*<div\s+className="text-muted-foreground text-xs"\s+title="% de créditos del período con mora activa"/,
+	);
+	expect(source).toMatch(
 		/const officialMoraMissing =\s*officialMoraRequired && officialMoraEsperado === undefined;/,
 	);
 	expect(source).toMatch(
-		/applyOfficialMonthlyMora\([\s\S]*?officialMoraOperationalMonth,\s*officialMoraEsperado,\s*\)/,
+		/applyOfficialMonthlyMora\([\s\S]*?officialMoraOperationalMonth,\s*officialMoraEsperado,\s*officialMoraMissing,\s*\)/,
 	);
 	expect(exportBlock).toContain("...(officialMoraMissing && {");
-	expect(exportBlock).toContain("avisoMoraMes");
+	expect(exportBlock).toMatch(
+		/avisoMoraMes: officialMoraQuery\.isError\s*\?\s*"No se pudo cargar el cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente\."\s*:\s*"Sin cierre oficial de Finanzas: la mora proyectada del mes actual queda pendiente\."/,
+	);
 	expect(exportBlock).toMatch(/if \(officialMoraMissing\) \{\s*toast\.warning\(/);
 	expect(exportBlock).not.toContain("officialMoraFailed");
 });

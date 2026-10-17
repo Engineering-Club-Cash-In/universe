@@ -211,7 +211,7 @@ export function buildAdminReportsWorkbook(input: {
 			"Interés + IVA": view.interesIva,
 			Servicios: view.servicios,
 			Membresías: view.membresias,
-			"Total mora": view.totalMora,
+			"Total mora": view.moraPendiente ? "Pendiente" : view.totalMora,
 			Total: view.total,
 			"Capital CUBE": view.capitalCube,
 			"Interés + IVA CUBE": view.interesIvaCube,
@@ -223,6 +223,13 @@ export function buildAdminReportsWorkbook(input: {
 		if (!last) throw new Error("No fue posible totalizar Cobranza.");
 		const total = { Período: "Total" } as Record<string, string | number>;
 		for (const key of Object.keys(last).slice(1)) {
+			if (
+				key === "Total mora" &&
+				input.cobranza.rows.some((row) => row.mora_pendiente)
+			) {
+				total[key] = "Pendiente";
+				continue;
+			}
 			total[key] = !input.cobranza.acumulado
 				? Math.round(
 						cobranzaRows.reduce(

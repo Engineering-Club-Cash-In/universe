@@ -110,7 +110,7 @@ const PREFIJO_NEGACION_COORDINADA = new RegExp(
 	`(?:^|\\s)(?:sin|libre\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas|tampoco)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:\\s+${VERBO_ESTADO_NEGADO.source})?)(?:\\s+[a-z0-9]+){0,5}\\s+ni(?:(?:\\s+se)?\\s+(?:${VERBO_ESTADO_NEGADO.source}|${VERBO_ESTADO_EN.source}\\s+en))?(?:\\s+(?:el|la|los|las|un|una|unos|unas))?\\s+$`,
 );
 const TERMINO_EVIDENCIA_NEGADA =
-	/(?:evidencias?|indicios?|senales?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?|registros?|riesgos?|casos?|tipos?|situacion(?:es)?|eventos?|incidentes?|episodios?)/;
+	/(?:evidencias?|indicios?|senal(?:es)?|pruebas?|hallazgos?|reportes?|antecedentes?|historial(?:es)?|registros?|riesgos?|casos?|tipos?|situacion(?:es)?|eventos?|incidentes?|episodios?)/;
 const CALIFICADOR_EVIDENCIA_NEGADA =
 	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?|negativ[oa]s?|desfavorables?|adversos?|adversas?|previos?|previas?)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(
@@ -199,7 +199,7 @@ export function clasificarMotivoExplicito(texto: string): RiesgoCartera | null {
 	if (
 		contieneAfirmacion(
 			normalizado,
-			/(?:^|\s)(?:malas?\s+pagas?|mal(?:os?|as?)\s+pagadores?|impagos?|incumplimientos?(?:\s+de\s+pago)?|moras?|moros[oa]s?|morosidad(?:es)?|cuotas?\s+(?:atrasadas?|vencidas?)|pagos?\s+(?:atrasados?|vencidos?)|atrasos?\s+de\s+pago)(?=\s|$)/g,
+			/(?:^|\s)(?:malas?\s+pagas?|mal(?:os?|as?)?\s+pagador(?:es|as?)?|impagos?|incumplimientos?(?:\s+de\s+pago)?|moras?|moros[oa]s?|morosidad(?:es)?|cuotas?\s+(?:atrasadas?|vencidas?)|pagos?\s+(?:atrasados?|vencidos?)|atrasos?\s+de\s+pago)(?=\s|$)/g,
 		) ||
 		contieneAfirmacion(
 			normalizado,

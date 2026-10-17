@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Car, Loader2 } from "lucide-react";
+import { useParams } from "@tanstack/react-router";
+import { Car, Loader2 } from "lucide-react";
 import { BarraPasos } from "@/components/barra-pasos";
+import { Encabezado } from "@/components/encabezado";
 import { DocumentosCaso } from "@/components/documentos-caso";
 import { ESTADOS, formatearFecha, formatearMonto } from "@/lib/pasos";
 import { cn } from "@/lib/utils";
@@ -13,17 +14,7 @@ export function CasoPage() {
 
 	return (
 		<div className="min-h-screen bg-slate-50">
-			<header className="border-slate-200 border-b bg-white">
-				<div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-4">
-					<Link
-						to="/"
-						className="flex items-center gap-1.5 text-slate-600 text-sm transition hover:text-slate-900"
-					>
-						<ArrowLeft className="h-4 w-4" />
-						Volver
-					</Link>
-				</div>
-			</header>
+			<Encabezado variante="caso" />
 
 			<main className="mx-auto max-w-2xl px-4 py-5">
 				{casoQuery.isPending ? (

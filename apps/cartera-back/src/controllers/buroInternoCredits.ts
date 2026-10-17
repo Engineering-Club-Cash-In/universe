@@ -127,7 +127,10 @@ export async function obtenerCreditosParaBuroInterno(params: {
 					})
 					.from(bad_debts)
 					.where(inArray(bad_debts.credit_id, creditosIds))
-					.orderBy(desc(bad_debts.id))
+					.orderBy(
+						sql`${bad_debts.fecha_registro} DESC NULLS LAST`,
+						desc(bad_debts.id),
+					)
 			: Promise.resolve([]),
 		creditosIds.length > 0
 			? db

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { destinoDelTab } from "./ciclo-foco";
+import { cierraSinBoton, destinoDelTab, ENFOCABLES } from "./ciclo-foco";
 
 const [cerrar, ver, reenviar] = ["cerrar", "ver", "reenviar"];
 const enfocables = [cerrar, ver, reenviar];
@@ -27,7 +27,40 @@ describe("destinoDelTab", () => {
 		expect(destinoDelTab([cerrar], cerrar, true)).toBe(cerrar);
 	});
 
-	test("sin elementos enfocables no hace nada", () => {
+	test("sin elementos enfocables y sin respaldo no hace nada", () => {
 		expect(destinoDelTab([], null, false)).toBeNull();
+	});
+
+	test("sin elementos enfocables devuelve el respaldo, hacia adelante y hacia atrás", () => {
+		expect(destinoDelTab([], null, false, "panel")).toBe("panel");
+		expect(destinoDelTab([], null, true, "panel")).toBe("panel");
+		// Con el foco ya en el panel, Tab lo retiene en vez de dejarlo salir.
+		expect(destinoDelTab([], "panel", false, "panel")).toBe("panel");
+		expect(destinoDelTab([], "panel", true, "panel")).toBe("panel");
+	});
+
+	test("el respaldo no se usa si hay elementos enfocables", () => {
+		expect(destinoDelTab(enfocables, ver, false, "panel")).toBeNull();
+		expect(destinoDelTab(enfocables, reenviar, false, "panel")).toBe(cerrar);
+	});
+});
+
+describe("cierraSinBoton", () => {
+	test("una ventana normal se cierra con el fondo o Escape", () => {
+		expect(cierraSinBoton(undefined)).toBe(true);
+		expect(cierraSinBoton(false)).toBe(true);
+	});
+
+	test("una ventana protegida solo se cierra con sus botones", () => {
+		expect(cierraSinBoton(true)).toBe(false);
+	});
+});
+
+describe("ENFOCABLES", () => {
+	test("usa :disabled para excluir también lo deshabilitado por un fieldset", () => {
+		expect(ENFOCABLES).not.toContain("[disabled]");
+		for (const control of ["button", "input", "select", "textarea"]) {
+			expect(ENFOCABLES).toContain(`${control}:not(:disabled)`);
+		}
 	});
 });

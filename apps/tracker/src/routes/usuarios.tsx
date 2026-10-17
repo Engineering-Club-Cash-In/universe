@@ -5,10 +5,12 @@ import {
 	ChevronRight,
 	Loader2,
 	Lock,
+	Plus,
 	Search,
 	Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { AltaUsuario } from "@/components/alta-usuario";
 import { Encabezado } from "@/components/encabezado";
 import { TAMANOS_PAGINA } from "@/lib/paginacion";
 import { etiquetaDeRol } from "@/lib/perfil";
@@ -36,6 +38,8 @@ export function UsuariosPage() {
 	const [filtros, setFiltros] = useState(FILTROS_INICIALES);
 	const [pagina, setPagina] = useState(1);
 	const [porPagina, setPorPagina] = useState(TAMANOS_PAGINA[0]);
+	const [altaAbierta, setAltaAbierta] = useState(false);
+	const cerrarAlta = useCallback(() => setAltaAbierta(false), []);
 
 	const usuarios = usuariosQuery.data ?? [];
 	const filtrados = filtrarUsuarios(usuarios, filtros);
@@ -46,6 +50,12 @@ export function UsuariosPage() {
 		porPagina,
 	);
 	const agencias = opcionesDeAgencia(usuarios);
+	// Agencias donde quien mira es gerente: solo ahí puede dar de alta.
+	const agenciasGerente = agencias.filter((a) =>
+		usuarios.some((u) =>
+			u.esYo && u.membresias.some((m) => m.companyId === a.id && m.rol === "gerente"),
+		),
+	);
 	// Un error con la lista ya cargada (un refetch que falló) no la esconde.
 	const estado = estadoDeConsulta(usuariosQuery);
 
@@ -59,9 +69,26 @@ export function UsuariosPage() {
 			<Encabezado variante="caso" ancho="3xl" />
 
 			<main className="mx-auto max-w-3xl space-y-4 px-4 py-5">
-				<h1 className="font-bold text-slate-900 text-xl">
-					Usuarios de mi agencia
-				</h1>
+				<div className="flex items-center justify-between gap-3">
+					<h1 className="font-bold text-slate-900 text-xl">
+						Usuarios de mi agencia
+					</h1>
+					{usuariosQuery.isSuccess && agenciasGerente.length > 0 && (
+						<button
+							type="button"
+							onClick={() => setAltaAbierta(true)}
+							className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 font-medium text-sm text-white transition hover:bg-slate-800"
+						>
+							<Plus className="h-4 w-4" />
+							Nuevo usuario
+						</button>
+					)}
+				</div>
+				<AltaUsuario
+					abierta={altaAbierta}
+					onCerrar={cerrarAlta}
+					agencias={agenciasGerente}
+				/>
 
 				{usuariosQuery.isPending ? (
 					<div className="flex items-center justify-center py-16 text-slate-500">
@@ -176,7 +203,12 @@ export function UsuariosPage() {
 										const { rol, activo } =
 											insigniasEn(u, filtros.agencia) ?? insigniasEn(u, "todas")!;
 										return (
-											<li key={u.id} className="space-y-1.5 px-4 py-3">
+											<li key={u.id}>
+											<Link
+												to="/usuarios/$id"
+												params={{ id: u.id }}
+												className="block space-y-1.5 px-4 py-3 transition hover:bg-slate-50"
+											>
 												<div className="flex items-start justify-between gap-3">
 													<div className="min-w-0">
 														<p className="truncate font-medium text-slate-900 text-sm">
@@ -217,6 +249,7 @@ export function UsuariosPage() {
 												<p className="truncate text-slate-500 text-xs">
 													{u.membresias.map((m) => m.companyNombre).join(", ")}
 												</p>
+											</Link>
 											</li>
 										);
 									})}

@@ -37,8 +37,14 @@ describe("rutaDeRetorno", () => {
 		expect(rutaDeRetorno(`/usuarios/${uuid}`, ORIGIN)).toBe(`/usuarios/${uuid}`);
 	});
 
+	test("el id de usuario es el de better-auth (32 caracteres), no un uuid", () => {
+		const id = "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE";
+		expect(rutaDeRetorno(`/usuarios/${id}`, ORIGIN)).toBe(`/usuarios/${id}`);
+	});
+
 	test("rechaza variantes de perfil y usuarios que no existen", () => {
-		expect(rutaDeRetorno("/usuarios/no-es-uuid", ORIGIN)).toBe("/");
+		expect(rutaDeRetorno("/usuarios/a/b", ORIGIN)).toBe("/");
+		expect(rutaDeRetorno("/usuarios/corto", ORIGIN)).toBe("/");
 		expect(rutaDeRetorno("/perfil/otro", ORIGIN)).toBe("/");
 		expect(rutaDeRetorno("//attacker.example/perfil", ORIGIN)).toBe("/");
 	});

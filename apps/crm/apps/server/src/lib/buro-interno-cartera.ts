@@ -100,7 +100,7 @@ const VERBO_ESTADO_NEGADO = new RegExp(
 );
 // Acepta un artículo y un sujeto antes del término: "no se detectó el fraude", "no era un cliente moroso".
 const PREFIJO_NEGACION_DIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido)|\\s+haber\\s+(?:tenido|sido|estado|presentado|registrado|reportado|mostrado|existido|habido|detectado|identificado|confirmado|comprobado|evidenciado|observado|encontrado|caido\\s+en|incurrido\\s+en)|\\s+(?:ser|estar|tener|presentar|registrar|reportar|mostrar|caer\\s+en|incurrir\\s+en))?|libre\\s+de|ausencia\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?(?:\\s+(?:cliente|clienta|clientes|deudor|deudora|deudores|titular|titulares|persona|personas))?\\s+$`,
+	`(?:^|\\s)(?:ningun[ao]?|sin(?:\\s+ningun[ao]?|\\s+(?:haber\\s+)?comet(?:er|ido)|\\s+haber\\s+(?:tenido|sido|estado|presentado|registrado|reportado|mostrado|existido|habido|detectado|identificado|confirmado|comprobado|evidenciado|observado|encontrado|caido\\s+en|incurrido\\s+en)|\\s+(?:ser|estar|tener|presentar|registrar|reportar|mostrar|caer\\s+en|incurrir\\s+en))?|libre\\s+de|ausencia\\s+de|(?:se\\s+)?descart(?:o|aron|ado|ada|ados|adas)|(?:nunca|jamas)(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?|no(?:(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source})?(?:\\s+ningun[ao]?)?)(?:\\s+(?:el|la|los|las|un|una|unos|unas))?(?:\\s+(?:cliente|clienta|clientes|deudor|deudora|deudores|titular|titulares|persona|personas))?\\s+$`,
 );
 // "No estuvo en mora", "no incurrió en mora", "nunca cayó en mora".
 // También "sin (haber) incurrido / caído / entrado en mora".
@@ -114,12 +114,12 @@ const TERMINO_EVIDENCIA_NEGADA =
 const CALIFICADOR_EVIDENCIA_NEGADA =
 	/(?:algun[ao]s?|concret[oa]s?|clar[oa]s?|suficientes?|confirmad[oa]s?|negativ[oa]s?|desfavorables?|adversos?|adversas?|previos?|previas?)/;
 const PREFIJO_NEGACION_INDIRECTA = new RegExp(
-	`(?:^|\\s)(?:sin(?:\\s+ningun[ao]?)?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source}\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+(?:ni|y|o)\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
+	`(?:^|\\s)(?:ningun[ao]?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|sin(?:\\s+ningun[ao]?)?\\s+${TERMINO_EVIDENCIA_NEGADA.source}|no(?:\\s+se)?\\s+${VERBO_ESTADO_NEGADO.source}\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source})(?:\\s+(?:ni|y|o)\\s+(?:ningun[ao]?\\s+)?${TERMINO_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+${CALIFICADOR_EVIDENCIA_NEGADA.source}){0,2}(?:\\s+de)?\\s+$`,
 );
 const PREFIJO_CONTEXTO_NO_RIESGO =
 	/(?:^|\s)(?:sin\s+problemas?\s+de|no\s+(?:se\s+le\s+cobro|aplica)|descuentos?\s+de|(?:se\s+)?condono(?:\s+la)?|cancelo\s+pagando(?:\s+la)?|(?:(?:fue|era|es|ha\s+sido)\s+)?victimas?\s+(?:del|de(?:\s+(?:un|una|el|la))?))\s+$/;
 const PREFIJO_PROBLEMAS_NEGADOS =
-	/(?:^|\s)no\s+(?:tiene|tenia|tuvo|presenta|presentaba|presento|hay|habia|hubo|existen?|existia(?:n)?|registra|registraba|reporta|reportaba|(?:ha|han|habia|habian)\s+(?:tenido|presentado|habido))\s+(?:ningun[ao]?\s+)?problemas?\s+de\s+$/;
+	/(?:^|\s)(?:no\s+(?:tiene|tenia|tuvo|presenta|presentaba|presento|hay|habia|hubo|existen?|existia(?:n)?|registra|registraba|reporta|reportaba|(?:ha|han|habia|habian)\s+(?:tenido|presentado|habido))\s+(?:ningun[ao]?\s+)?|ningun[ao]?\s+)problemas?\s+de\s+$/;
 const PREFIJO_DEUDA_NEGADA =
 	/(?:^|\s)(?:sin|no(?:\s+(?:se\s+)?(?:tiene|tenia|tuvo|hay|habia|hubo|existe(?:n)?|existia(?:n)?|presenta|presentaba|presento|cuenta\s+con|contaba\s+con|posee|poseia|adeuda|adeudaba|debe|debia|registra|registraba|reporta|reportaba|mantiene|mantenia))?)(?:\s+ningun[ao]?)?\s+(?:cuotas?|deudas?|atrasos?|incumplimientos?|saldos?|montos?|pagos?)\s+(?:en|de)\s+$/;
 const PREFIJO_ESTADO_EN_NEGADO = new RegExp(

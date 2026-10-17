@@ -1145,11 +1145,20 @@ async function registrarCoincidenciasCarteraSinCola(
 		candidatos: CandidatoBuroInterno[];
 		personaAutomatica: BuroInternoPersona | null;
 	};
+	// SIFCO de todos los créditos de cada cliente, también los sin riesgo: el
+	// lead del CRM puede estar ligado solo a un crédito sin evidencia.
+	const sifcosPorUsuario = new Map<number, Set<string>>();
 	const grupos = new Map<number, GrupoCartera>();
 	for (const credito of creditos) {
 		const usuarioId = credito.usuarios?.usuario_id;
 		if (!Number.isInteger(usuarioId))
 			throw new Error("Cartera devolvió un cliente sin identificador válido");
+		const sifcoCredito = credito.creditos.numero_credito_sifco;
+		if (sifcoCredito) {
+			const sifcosUsuario = sifcosPorUsuario.get(usuarioId) ?? new Set<string>();
+			sifcosUsuario.add(sifcoCredito);
+			sifcosPorUsuario.set(usuarioId, sifcosUsuario);
+		}
 		const riesgos = evidenciaRiesgoCredito(credito);
 		if (riesgos.length === 0) continue;
 		const grupo = grupos.get(usuarioId) ?? {
@@ -1169,9 +1178,9 @@ async function registrarCoincidenciasCarteraSinCola(
 	}
 	const sifcosParaEnriquecer = [
 		...new Set(
-			[...grupos.values()].flatMap((grupo) =>
-				grupo.creditos.map((credito) => credito.creditos.numero_credito_sifco),
-			),
+			[...grupos.keys()].flatMap((usuarioId) => [
+				...(sifcosPorUsuario.get(usuarioId) ?? []),
+			]),
 		),
 	];
 	if (sifcosParaEnriquecer.length > 0) {
@@ -1212,11 +1221,9 @@ async function registrarCoincidenciasCarteraSinCola(
 			leadsRelacionados,
 			sifcosParaEnriquecer,
 		);
-		for (const grupo of grupos.values()) {
-			for (const credito of grupo.creditos) {
-				for (const relacionado of porSifco.get(
-					credito.creditos.numero_credito_sifco,
-				) ?? []) {
+		for (const [usuarioId, grupo] of grupos) {
+			for (const sifco of sifcosPorUsuario.get(usuarioId) ?? []) {
+				for (const relacionado of porSifco.get(sifco) ?? []) {
 					if (grupo.leads.some((lead) => lead.id === relacionado.id)) continue;
 					grupo.leads.push({
 						id: relacionado.id,

@@ -30,6 +30,7 @@ import * as reportsRouter from "./reports";
 import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
 import { trackerRouter } from "./tracker";
+import { trackerUsuariosRouter } from "./tracker-usuarios";
 import { uploadRouter } from "./upload";
 import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
@@ -556,6 +557,7 @@ export const partnerTrackerRouter = {
 	subirFacturaSeguro: trackerRouter.subirFacturaSeguro,
 	reenviarFacturaSeguro: trackerRouter.reenviarFacturaSeguro,
 	verFacturaSeguro: trackerRouter.verFacturaSeguro,
+	getMiPerfil: trackerUsuariosRouter.getMiPerfil,
 };
 
 // Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.

@@ -336,8 +336,10 @@ describe("getUsuarioDeMiAgencia", () => {
 });
 
 describe("superficie y montaje", () => {
-	test("tracker-usuarios expone exactamente sus 3 procedures", () => {
+	test("tracker-usuarios expone exactamente sus 5 procedures", () => {
 		expect(Object.keys(trackerUsuariosRouter).sort()).toEqual([
+			"crearUsuarioDeMiAgencia",
+			"editarUsuarioDeMiAgencia",
 			"getMiPerfil",
 			"getUsuarioDeMiAgencia",
 			"getUsuariosDeMiAgencia",

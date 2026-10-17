@@ -135,8 +135,9 @@ const PREFIJO_VERIFICACION_FALLIDA =
 	/(?:^|\s)no(?:\s+se)?\s+(?:pudo|pudieron|puede|pueden|logro|lograron|fue\s+posible|ha\s+sido\s+posible)\s+(?:comprobar|confirmar|detectar|identificar|evidenciar|verificar|demostrar|acreditar)(?:\s+(?:el|la|los|las|un|una|unos|unas|ningun[ao]?))?\s+$/;
 // "No está reportado como moroso", "no figura como moroso", "no fue declarado
 // incobrable": una clasificación negada no afirma el riesgo.
+// También con sujeto: "no fue considerado un cliente moroso".
 const PREFIJO_CLASIFICACION_NEGADA =
-	/(?:^|\s)(?:no|nunca|jamas|tampoco)(?:\s+se)?(?:\s+(?:esta|estaba|estan|fue|fueron|ha\s+sido|han\s+sido|era|es))?\s+(?:reportad[oa]s?|declarad[oa]s?|registrad[oa]s?|clasificad[oa]s?|calificad[oa]s?|considerad[oa]s?|catalogad[oa]s?|marcad[oa]s?|figura|figuraba|figuran|aparece|aparecia|aparecen)(?:\s+como)?\s+$/;
+	/(?:^|\s)(?:no|nunca|jamas|tampoco)(?:\s+se)?(?:\s+(?:esta|estaba|estaban|estan|estuvo|fue|fueron|ha\s+sido|han\s+sido|habia\s+sido|habian\s+sido|era|eran|es|son))?\s+(?:reportad[oa]s?|declarad[oa]s?|registrad[oa]s?|clasificad[oa]s?|calificad[oa]s?|considerad[oa]s?|catalogad[oa]s?|marcad[oa]s?|figura|figuraba|figuran|aparece|aparecia|aparecen)(?:\s+como)?(?:\s+(?:el|la|los|las|un|una|unos|unas))?(?:\s+(?:cliente|clienta|clientes|deudor|deudora|deudores|titular|titulares|persona|personas))?\s+$/;
 // Negación pospuesta: "fraude no detectado", "mora no comprobada". "No aplica"
 // solo cuenta al final del texto, para no negar "mora, no aplica descuento".
 // También "fraude sin evidencia", "mora sin pruebas".

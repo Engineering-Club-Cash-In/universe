@@ -254,6 +254,17 @@ export default function Header() {
 											Carros en Remate
 										</Link>
 									</DropdownMenuItem>
+									{PERMISSIONS.canManageAgencies(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link
+												to="/vehicles/agencias"
+												className="cursor-pointer"
+											>
+												<Building2 className="mr-2 h-4 w-4" />
+												Agencias
+											</Link>
+										</DropdownMenuItem>
+									)}
 									{userRole === ROLES.ADMIN && (
 										<DropdownMenuItem asChild>
 											<Link
@@ -668,6 +679,15 @@ function MobileNav({
 											<Gavel />
 											Carros en Remate
 										</Link>
+										{PERMISSIONS.canManageAgencies(userRole) && (
+											<Link
+												to="/vehicles/agencias"
+												className={MOBILE_LINK_CLASS}
+											>
+												<Building2 />
+												Agencias
+											</Link>
+										)}
 										{userRole === ROLES.ADMIN && (
 											<Link
 												to="/vehicles/sat-verificacion"

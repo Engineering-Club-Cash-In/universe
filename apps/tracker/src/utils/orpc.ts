@@ -23,6 +23,32 @@ export const esErrorDeAcceso = (error: Error): boolean =>
 export const esForbidden = (error: Error): boolean =>
 	error instanceof ORPCError && error.status === 403;
 
+export const esNoEncontrado = (error: Error): boolean =>
+	error instanceof ORPCError &&
+	(error.code === "NOT_FOUND" || error.status === 404);
+
+export type EstadoDeConsulta =
+	| "datos"
+	| "sin-acceso"
+	| "no-encontrado"
+	| "fallo";
+
+// Qué pintar para una consulta que ya dejó de cargar. Un acceso revocado (401/403)
+// o un recurso que ya no existe mandan aunque haya datos en caché: ya no son
+// vigentes. Cualquier otro error con datos ya cargados (un refetch que falló
+// por red, un 500 pasajero) NO esconde la pantalla: se siguen mostrando.
+export function estadoDeConsulta(consulta: {
+	data: unknown;
+	isError: boolean;
+	error: Error | null | undefined;
+}): EstadoDeConsulta {
+	const { data, isError, error } = consulta;
+	if (!isError || !error) return "datos";
+	if (esErrorDeAcceso(error)) return "sin-acceso";
+	if (esNoEncontrado(error)) return "no-encontrado";
+	return data === undefined || data === null ? "fallo" : "datos";
+}
+
 // Una consulta que muestra su propio "No tienes acceso" pide callar el aviso global.
 // Una que pinta su propio estado de error (tarjeta) pide callar cualquier aviso,
 // salvo la sesión expirada, que siempre redirige al login.

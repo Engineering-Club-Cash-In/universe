@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { logo } from "@/assets";
 import { authClient, cerrarSesion } from "@/lib/auth-client";
 import { esGerente } from "@/lib/perfil";
-import { esErrorDeAcceso, orpc } from "@/utils/orpc";
+import { opcionesMiPerfil } from "@/utils/opciones-perfil";
+import { esErrorDeAcceso } from "@/utils/orpc";
 
 type Props = {
 	// Listado: logo, título, correo y agencias. Caso: solo "Volver".
@@ -27,11 +28,7 @@ function MenuAvatar() {
 	const { data: session } = authClient.useSession();
 	// Un socio sin agencias activas recibe 403 aquí: el listado ya muestra su
 	// propio aviso, así que esta consulta no repite el toast ni reintenta cada minuto.
-	const perfilQuery = useQuery({
-		...orpc.getMiPerfil.queryOptions({ input: {} }),
-		refetchInterval: false,
-		meta: { sinAvisoDeAcceso: true },
-	});
+	const perfilQuery = useQuery(opcionesMiPerfil());
 	const [abierto, setAbierto] = useState(false);
 	const contenedor = useRef<HTMLDivElement>(null);
 	const identificadorSocio = session?.user.id ?? session?.user.email ?? null;
@@ -86,11 +83,11 @@ function MenuAvatar() {
 							{session?.user.email}
 						</p>
 					</div>
-					{/* <a> y no <Link>: /perfil y /usuarios se registran en 5/7 y 6/7. */}
-					<a role="menuitem" href="/perfil" className={itemClase}>
+					{/* <a> y no <Link>: /usuarios se registra en 6/7. */}
+					<Link role="menuitem" to="/perfil" className={itemClase}>
 						<User className="h-4 w-4" />
 						Mi perfil
-					</a>
+					</Link>
 					{verUsuarios && (
 						<a role="menuitem" href="/usuarios" className={itemClase}>
 							<Users className="h-4 w-4" />

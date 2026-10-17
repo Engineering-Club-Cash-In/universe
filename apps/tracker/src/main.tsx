@@ -14,6 +14,7 @@ import { CasoPage } from "@/routes/caso";
 import { CambiarContrasenaPage } from "@/routes/cambiar-contrasena";
 import { ListadoPage } from "@/routes/listado";
 import { LoginPage } from "@/routes/login";
+import { PerfilPage } from "@/routes/perfil";
 import { queryClient } from "@/utils/orpc";
 import "./styles.css";
 
@@ -58,11 +59,22 @@ const cambiarContrasenaRoute = createRoute({
 	component: CambiarContrasenaPage,
 });
 
+const perfilRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/perfil",
+	component: () => (
+		<RequireAuth>
+			<PerfilPage />
+		</RequireAuth>
+	),
+});
+
 const routeTree = rootRoute.addChildren([
 	loginRoute,
 	listadoRoute,
 	casoRoute,
 	cambiarContrasenaRoute,
+	perfilRoute,
 ]);
 
 const router = createRouter({

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { esGerente } from "./perfil";
+import { esGerente, etiquetaDeRol } from "./perfil";
 
 describe("esGerente", () => {
 	test("es gerente si lo es en al menos una agencia", () => {
@@ -17,5 +17,12 @@ describe("esGerente", () => {
 		expect(esGerente({ agencias: [{ rol: "usuario" }] })).toBe(false);
 		expect(esGerente({ agencias: [] })).toBe(false);
 		expect(esGerente(undefined)).toBe(false);
+	});
+});
+
+describe("etiquetaDeRol", () => {
+	test("nombra el rol en lenguaje de negocio", () => {
+		expect(etiquetaDeRol("gerente")).toBe("Gerente");
+		expect(etiquetaDeRol("usuario")).toBe("Usuario de agencia");
 	});
 });

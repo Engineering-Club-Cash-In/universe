@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	esErrorDeAcceso,
 	esForbidden,
+	estadoDeConsulta,
 	silenciaAvisoGlobal,
 	sinRepetirSiFalla,
 } from "./orpc";
@@ -62,5 +63,47 @@ describe("sinRepetirSiFalla", () => {
 		expect(sinRepetirSiFalla.retry(0, new ORPCError("FORBIDDEN"))).toBe(false);
 		expect(sinRepetirSiFalla.retry(0, new Error("red"))).toBe(true);
 		expect(sinRepetirSiFalla.retry(1, new Error("red"))).toBe(false);
+	});
+});
+
+describe("estadoDeConsulta", () => {
+	const datos = { id: "u1" };
+	test("sin error son datos", () => {
+		expect(estadoDeConsulta({ data: datos, isError: false, error: null })).toBe("datos");
+	});
+	test("401 y 403 son sin acceso, aunque quede algo en caché", () => {
+		for (const code of ["UNAUTHORIZED", "FORBIDDEN"] as const) {
+			const error = new ORPCError(code);
+			expect(estadoDeConsulta({ data: undefined, isError: true, error })).toBe("sin-acceso");
+			expect(estadoDeConsulta({ data: datos, isError: true, error })).toBe("sin-acceso");
+		}
+	});
+	test("NOT_FOUND (404) es no encontrado", () => {
+		const error = new ORPCError("NOT_FOUND");
+		expect(estadoDeConsulta({ data: undefined, isError: true, error })).toBe("no-encontrado");
+	});
+	test("otro error sin datos es fallo", () => {
+		expect(
+			estadoDeConsulta({
+				data: undefined,
+				isError: true,
+				error: new ORPCError("INTERNAL_SERVER_ERROR"),
+			}),
+		).toBe("fallo");
+		expect(
+			estadoDeConsulta({ data: undefined, isError: true, error: new Error("red") }),
+		).toBe("fallo");
+	});
+	test("un error pasajero con datos en caché sigue mostrando los datos", () => {
+		expect(
+			estadoDeConsulta({ data: datos, isError: true, error: new Error("red") }),
+		).toBe("datos");
+		expect(
+			estadoDeConsulta({
+				data: datos,
+				isError: true,
+				error: new ORPCError("INTERNAL_SERVER_ERROR"),
+			}),
+		).toBe("datos");
 	});
 });

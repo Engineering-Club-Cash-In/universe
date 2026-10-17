@@ -4,6 +4,7 @@ import { Building, Globe, Mail, MapPin, Pencil, Phone, Plus, Search } from "luci
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { EmpresaCrearDialog } from "@/components/agencias/empresa-crear-dialog";
+import { GerentesTab } from "@/components/agencias/gerentes-tab";
 import { EmpresaEditarDialog } from "@/components/agencias/empresa-editar-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	Table,
 	TableBody,
@@ -211,28 +213,39 @@ function RouteComponent() {
 					if (!abierto) setDetalleId(null);
 				}}
 			>
-				<DialogContent className="max-w-xl">
+				<DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>{detalle?.name}</DialogTitle>
 					</DialogHeader>
 					{detalle && (
-						<div className="space-y-3 text-sm">
-							<Dato icono={<Mail className="h-4 w-4" />} valor={detalle.email} />
-							<Dato icono={<Phone className="h-4 w-4" />} valor={detalle.phone} />
-							<Dato icono={<MapPin className="h-4 w-4" />} valor={detalle.address} />
-							<Dato icono={<Globe className="h-4 w-4" />} valor={detalle.website} />
-							{detalle.notes && (
-								<p className="whitespace-pre-wrap text-muted-foreground">
-									{detalle.notes}
-								</p>
-							)}
-							<div className="flex justify-end pt-2">
-								<Button onClick={() => setEditando(true)}>
-									<Pencil className="mr-2 h-4 w-4" />
-									Editar agencia
-								</Button>
-							</div>
-						</div>
+						<Tabs defaultValue="datos">
+							<TabsList>
+								<TabsTrigger value="datos">Datos</TabsTrigger>
+								<TabsTrigger value="gerentes">Gerentes</TabsTrigger>
+							</TabsList>
+							<TabsContent value="datos">
+										<div className="space-y-3 text-sm">
+											<Dato icono={<Mail className="h-4 w-4" />} valor={detalle.email} />
+											<Dato icono={<Phone className="h-4 w-4" />} valor={detalle.phone} />
+											<Dato icono={<MapPin className="h-4 w-4" />} valor={detalle.address} />
+											<Dato icono={<Globe className="h-4 w-4" />} valor={detalle.website} />
+											{detalle.notes && (
+												<p className="whitespace-pre-wrap text-muted-foreground">
+													{detalle.notes}
+												</p>
+											)}
+											<div className="flex justify-end pt-2">
+												<Button onClick={() => setEditando(true)}>
+													<Pencil className="mr-2 h-4 w-4" />
+													Editar agencia
+												</Button>
+											</div>
+										</div>
+							</TabsContent>
+							<TabsContent value="gerentes">
+								<GerentesTab companyId={detalle.id} />
+							</TabsContent>
+						</Tabs>
 					)}
 				</DialogContent>
 			</Dialog>

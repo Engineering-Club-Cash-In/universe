@@ -93,7 +93,11 @@ export async function obtenerCreditosParaBuroInterno(): Promise<{
 					id: bad_debts.id,
 				})
 				.from(bad_debts)
-				.orderBy(asc(bad_debts.credit_id), desc(bad_debts.id));
+				.orderBy(
+					asc(bad_debts.credit_id),
+					sql`${bad_debts.fecha_registro} DESC NULLS LAST`,
+					desc(bad_debts.id),
+				);
 			const caidos = await tx
 				.select({
 					credit_id: creditos_caidos.credit_id,

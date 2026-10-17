@@ -1339,17 +1339,32 @@ async function registrarCoincidenciasCarteraSinCola(
 				.sort((a, b) => Number(Boolean(b.lead)) - Number(Boolean(a.lead)));
 		// Un cliente de una sola identidad es una sola persona: si alguno de sus
 		// leads coincidió, se usa un solo objetivo (el lead de su ficha automática
-		// si ya existe, o el primero en orden estable) con los candidatos de todos,
-		// para no crear varias fichas de la misma persona.
+		// si ya existe, aunque no coincida ahora, o el primero en orden estable)
+		// con los candidatos de todos, para no crear varias fichas de la misma persona.
 		const identidadUnica = !(
 			grupos.get(usuarioId)?.usuario.nombre.includes("/") ?? true
 		);
 		const conLead = objetivosUsuario.filter((objetivo) => objetivo.lead);
 		const leadsGuardados = leadsAutomaticosPorUsuario.get(usuarioId);
+		// El lead de la ficha guardada se busca entre todos los leads del cliente,
+		// no solo entre los que coinciden ahora: si el solicitante actual solo
+		// coincide con otro lead o con la identidad base, se sigue usando la misma
+		// ficha en vez de crear otra para el mismo cliente.
+		const leadGuardado = grupos
+			.get(usuarioId)
+			?.leads.find((lead) => leadsGuardados?.has(lead.id));
 		const primerLead =
 			conLead.find(
 				(objetivo) => objetivo.lead && leadsGuardados?.has(objetivo.lead.id),
-			) ?? conLead[0];
+			) ??
+			(leadGuardado
+				? {
+						lead: leadGuardado,
+						identidad: null,
+						candidatos: [],
+						personaAutomatica: null,
+					}
+				: conLead[0]);
 		objetivosPorUsuario.set(
 			usuarioId,
 			identidadUnica && primerLead
